@@ -1,0 +1,24 @@
+appId: com.privateaichat.app
+productName: Private AI Chat
+directories:
+  output: dist
+  buildResources: build
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+  requestedExecutionLevel: requireAdministrator
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+files:
+  - src/**/*
+  - package.json
+  - node_modules/**/*
+exclude:
+  - "**/*.{md,ts,map}"
+
