@@ -89,10 +89,25 @@
           const settings = configResult.data.settings || {};
           const voiceAPI = settings.voiceAPI || 'groq-whisper'; // Default to Groq Whisper (more reliable)
           
+          if (window.logsPanel) {
+            window.logsPanel.addLog('info', `Voice input initialized with API: ${voiceAPI}`, null, {
+              source: 'VoiceInput',
+              action: 'voice_input_initialized',
+              api: voiceAPI,
+              enabled: settings.voiceEnabled !== false
+            });
+          }
+          
           // Check if voice is enabled
           if (settings.voiceEnabled === false) {
             this.listenButton.disabled = true;
             this.listenButton.title = 'Voice input is disabled in Settings';
+            if (window.logsPanel) {
+              window.logsPanel.addLog('warn', 'Voice input is disabled in settings', null, {
+                source: 'VoiceInput',
+                action: 'voice_disabled'
+              });
+            }
             return;
           }
           
@@ -109,6 +124,12 @@
         }
       } catch (e) {
         console.warn('Failed to load voice settings, defaulting to Whisper:', e);
+        if (window.logsPanel) {
+          window.logsPanel.addLog('warn', `Failed to load voice settings, defaulting to Whisper: ${e.message}`, e.stack, {
+            source: 'VoiceInput',
+            action: 'settings_load_error'
+          });
+        }
       }
       
       // Default to Whisper if settings not available
@@ -350,17 +371,29 @@
     
     async startWhisperRecording() {
       try {
+        // Log: Starting voice recording
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', '🎤 Voice recording started', null, { source: 'VoiceInput', action: 'start_recording' });
+        }
+        
         // Check if voice is enabled
         const configResult = await window.electronAPI.getConfig();
         if (configResult.success && configResult.data) {
           const settings = configResult.data.settings || {};
           if (settings.voiceEnabled === false) {
-            this.showVoiceError('Voice input is disabled in Settings.');
+            const errorMsg = 'Voice input is disabled in Settings.';
+            this.showVoiceError(errorMsg);
+            if (window.logsPanel) {
+              window.logsPanel.addLog('warn', 'Voice recording blocked: Voice input disabled in settings', null, { source: 'VoiceInput' });
+            }
             return;
           }
         }
         
         // Get microphone access
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', 'Requesting microphone access...', null, { source: 'VoiceInput', action: 'request_microphone' });
+        }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
         // Create MediaRecorder
@@ -368,24 +401,72 @@
           mimeType: 'audio/webm;codecs=opus'
         });
         
+        if (window.logsPanel) {
+          window.logsPanel.addLog('success', 'Microphone access granted. MediaRecorder created', null, { 
+            source: 'VoiceInput', 
+            action: 'microphone_granted',
+            mimeType: 'audio/webm;codecs=opus'
+          });
+        }
+        
         this.audioChunks = [];
+        let totalAudioSize = 0;
         
         this.mediaRecorder.ondataavailable = (event) => {
           if (event.data.size > 0) {
             this.audioChunks.push(event.data);
+            totalAudioSize += event.data.size;
+            // Log audio chunks periodically (every 2 seconds)
+            if (this.audioChunks.length % 2 === 0 && window.logsPanel) {
+              window.logsPanel.addLog('info', `Audio chunk received (${event.data.size} bytes). Total: ${totalAudioSize} bytes`, null, {
+                source: 'VoiceInput',
+                action: 'audio_chunk_received',
+                chunkSize: event.data.size,
+                totalSize: totalAudioSize,
+                chunkCount: this.audioChunks.length
+              });
+            }
           }
         };
         
         this.mediaRecorder.onstop = async () => {
+          // Log: Recording stopped
+          if (window.logsPanel) {
+            window.logsPanel.addLog('info', '🛑 Voice recording stopped', null, {
+              source: 'VoiceInput',
+              action: 'stop_recording',
+              chunkCount: this.audioChunks.length,
+              totalSize: totalAudioSize
+            });
+          }
+          
           // Stop all tracks
           stream.getTracks().forEach(track => track.stop());
           
           // Create blob from chunks
           const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+          const audioSize = audioBlob.size;
           
-          // Convert to buffer for IPC
+          if (window.logsPanel) {
+            window.logsPanel.addLog('info', `Processing audio: ${audioSize} bytes, ${this.audioChunks.length} chunks`, null, {
+              source: 'VoiceInput',
+              action: 'processing_audio',
+              audioSize: audioSize,
+              chunkCount: this.audioChunks.length
+            });
+          }
+          
+          // Convert to ArrayBuffer/Uint8Array for IPC (Buffer not available in renderer)
           const arrayBuffer = await audioBlob.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          if (window.logsPanel) {
+            window.logsPanel.addLog('info', `Audio converted to Uint8Array (${uint8Array.length} bytes)`, null, {
+              source: 'VoiceInput',
+              action: 'audio_converted',
+              arrayLength: uint8Array.length
+            });
+          }
           
           // Get OpenAI API key
           const configResult = await window.electronAPI.getConfig();
@@ -410,12 +491,30 @@
           });
           
           if (!apiAccount || !apiAccount.apiKey) {
+            const errorMsg = 'No API key found for Whisper transcription.';
             this.showVoiceError(
-              'No API key found for Whisper transcription.\n\n' +
+              errorMsg + '\n\n' +
               'Please add an OpenAI or Groq account with Whisper model in Settings → AI Accounts.\n\n' +
               'For Groq: Use whisper-large-v3 or whisper-large-v3-turbo model'
             );
+            if (window.logsPanel) {
+              window.logsPanel.addLog('error', 'Voice transcription failed: No API key found', null, {
+                source: 'VoiceInput',
+                action: 'transcription_error',
+                error: 'no_api_key',
+                availableAccounts: accounts.length
+              });
+            }
             return;
+          }
+          
+          if (window.logsPanel) {
+            window.logsPanel.addLog('info', `Found API account: ${apiAccount.type} (${apiAccount.name || 'Unnamed'})`, null, {
+              source: 'VoiceInput',
+              action: 'api_account_found',
+              provider: apiAccount.type,
+              accountName: apiAccount.name
+            });
           }
           
           // Show processing status
@@ -443,32 +542,95 @@
               }
             }
             
+            if (window.logsPanel) {
+              window.logsPanel.addLog('info', `Sending audio to ${apiAccount.type} Whisper API (model: ${whisperModel})`, null, {
+                source: 'VoiceInput',
+                action: 'sending_to_api',
+                provider: apiAccount.type,
+                model: whisperModel,
+                audioSize: uint8Array.length
+              });
+            }
+            
+            const transcriptionStartTime = Date.now();
             const result = await window.electronAPI.transcribeAudio(
-              buffer,
+              uint8Array,
               apiAccount.apiKey,
               apiAccount.type || 'openai',
               whisperModel
             );
+            const transcriptionDuration = Date.now() - transcriptionStartTime;
             
             if (result.success && result.text) {
+              const transcribedText = result.text.trim();
+              
+              if (window.logsPanel) {
+                window.logsPanel.addLog('success', `✅ Transcription successful (${transcriptionDuration}ms): "${transcribedText.substring(0, 50)}${transcribedText.length > 50 ? '...' : ''}"`, null, {
+                  source: 'VoiceInput',
+                  action: 'transcription_success',
+                  provider: apiAccount.type,
+                  model: whisperModel,
+                  duration: transcriptionDuration,
+                  textLength: transcribedText.length,
+                  transcribedText: transcribedText
+                });
+              }
+              
               // Clear status
               if (this.voiceStatusEl) {
                 this.voiceStatusEl.classList.remove('active');
               }
               
               // Send transcribed text to AI
-              this.sendVoiceMessage(result.text.trim());
+              if (window.logsPanel) {
+                window.logsPanel.addLog('info', `Sending transcribed text to AI chat`, null, {
+                  source: 'VoiceInput',
+                  action: 'sending_to_chat',
+                  textLength: transcribedText.length
+                });
+              }
+              
+              this.sendVoiceMessage(transcribedText);
             } else {
-              this.showVoiceError('Transcription failed: ' + (result.error || 'Unknown error'));
+              const errorMsg = 'Transcription failed: ' + (result.error || 'Unknown error');
+              this.showVoiceError(errorMsg);
+              if (window.logsPanel) {
+                window.logsPanel.addLog('error', `❌ Transcription failed: ${result.error || 'Unknown error'}`, null, {
+                  source: 'VoiceInput',
+                  action: 'transcription_error',
+                  provider: apiAccount.type,
+                  model: whisperModel,
+                  duration: transcriptionDuration,
+                  error: result.error,
+                  errorDetails: result
+                });
+              }
             }
           } catch (error) {
-            this.showVoiceError('Failed to transcribe: ' + error.message);
+            const errorMsg = 'Failed to transcribe: ' + error.message;
+            this.showVoiceError(errorMsg);
+            if (window.logsPanel) {
+              window.logsPanel.addLog('error', `❌ Transcription exception: ${error.message}`, error.stack, {
+                source: 'VoiceInput',
+                action: 'transcription_exception',
+                error: error.message,
+                stack: error.stack
+              });
+            }
           }
         };
         
         // Start recording
         this.mediaRecorder.start(1000); // Collect data every second
         this.isRecording = true;
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('success', '🎤 Recording in progress... Speak now!', null, {
+            source: 'VoiceInput',
+            action: 'recording_active',
+            timeslice: 1000
+          });
+        }
         
         // Update UI
         this.listenButton.textContent = '🛑 Stop';
@@ -484,15 +646,32 @@
         
       } catch (error) {
         console.error('Failed to start recording:', error);
+        
+        let errorLog = {
+          source: 'VoiceInput',
+          action: 'recording_start_error',
+          errorName: error.name,
+          errorMessage: error.message
+        };
+        
         if (error.name === 'NotAllowedError') {
-          this.showVoiceError(
-            'Microphone permission denied.\n\n' +
-            'Please allow microphone access in your browser settings.'
-          );
+          const errorMsg = 'Microphone permission denied. Please allow microphone access.';
+          this.showVoiceError(errorMsg);
+          if (window.logsPanel) {
+            window.logsPanel.addLog('error', '❌ Microphone permission denied', error.stack, errorLog);
+          }
         } else if (error.name === 'NotFoundError') {
-          this.showVoiceError('No microphone found. Please connect a microphone.');
+          const errorMsg = 'No microphone found. Please connect a microphone.';
+          this.showVoiceError(errorMsg);
+          if (window.logsPanel) {
+            window.logsPanel.addLog('error', '❌ No microphone found', error.stack, errorLog);
+          }
         } else {
-          this.showVoiceError('Failed to start recording: ' + error.message);
+          const errorMsg = 'Failed to start recording: ' + error.message;
+          this.showVoiceError(errorMsg);
+          if (window.logsPanel) {
+            window.logsPanel.addLog('error', `❌ Recording start failed: ${error.message}`, error.stack, errorLog);
+          }
         }
       }
     }
@@ -570,13 +749,75 @@
       }
     }
     
-    sendVoiceMessage(text) {
-      if (!text || !text.trim()) return;
+    async sendVoiceMessage(text) {
+      if (!text || !text.trim()) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('warn', 'Voice message empty, not sending to AI', null, {
+            source: 'VoiceInput',
+            action: 'empty_message_skipped'
+          });
+        }
+        return;
+      }
       
-      // Add user message
-      this.addMessage('user', text);
+      if (window.logsPanel) {
+        window.logsPanel.addLog('info', `✅ Voice transcription complete: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`, null, {
+          source: 'VoiceInput',
+          action: 'transcription_complete',
+          textLength: text.length
+        });
+      }
       
-      // Trigger AI response
+      // Log which chat provider/model will be used (NOT Whisper - Whisper is only for transcription)
+      if (window.logsPanel) {
+        try {
+          const configResult = await window.electronAPI.getConfig();
+          if (configResult.success && configResult.data) {
+            const globalCurrentProviderId = window.currentProviderId || null;
+            if (globalCurrentProviderId) {
+              const accounts = configResult.data.accounts || [];
+              const chatAccount = accounts.find(acc => acc.name === globalCurrentProviderId);
+              if (chatAccount) {
+                window.logsPanel.addLog('info', `🎯 Auto-sending to Chat: "${chatAccount.name}" (${chatAccount.model || 'default model'})`, null, {
+                  source: 'VoiceInput',
+                  action: 'auto_sending_to_chat',
+                  provider: chatAccount.name,
+                  providerType: chatAccount.type,
+                  chatModel: chatAccount.model,
+                  flow: 'Voice → Whisper (transcription) → Chat Model (auto-reply)'
+                });
+              } else {
+                window.logsPanel.addLog('warn', `⚠️ No chat provider selected. Please select one from the dropdown.`, null, {
+                  source: 'VoiceInput',
+                  action: 'no_chat_provider'
+                });
+              }
+            } else {
+              window.logsPanel.addLog('warn', `⚠️ No chat provider selected. Please select one from the dropdown.`, null, {
+                source: 'VoiceInput',
+                action: 'no_chat_provider'
+              });
+            }
+          }
+        } catch (e) {
+          // Ignore errors in logging
+        }
+      }
+      
+      // Add user message with voice indicator
+      this.addMessage('user', `🎤 ${text}`);
+      
+      // Automatically trigger AI response - this uses the selected chat provider/model (NOT Whisper)
+      // Whisper was only used for transcription above, now we send text to chat model for AI response
+      if (window.logsPanel) {
+        window.logsPanel.addLog('info', `🚀 Auto-sending transcribed text to AI chat (will get automatic reply)`, null, {
+          source: 'VoiceInput',
+          action: 'auto_sending_message',
+          textLength: text.length
+        });
+      }
+      
+      // Dispatch event to trigger AI response automatically
       window.dispatchEvent(new CustomEvent('chat-send-message', {
         detail: { content: text }
       }));
@@ -1456,6 +1697,24 @@
         return;
       }
       
+      // Prevent Whisper models from being saved as chat models
+      const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
+      if (whisperModels.includes(modelValue)) {
+        alert(
+          '❌ Error: Whisper models are for audio transcription only, not chat!\n\n' +
+          '📝 For Chat Models:\n' +
+          '   • Groq: Use "llama-3.1-8b-instant" or "llama-3.3-70b-versatile"\n' +
+          '   • OpenAI: Use "gpt-4" or "gpt-3.5-turbo"\n\n' +
+          '🎤 For Voice Input:\n' +
+          '   • Whisper models are selected in Settings → Privacy → Voice Input\n' +
+          '   • They transcribe your voice → then send text to your chat model\n\n' +
+          '💡 How it works:\n' +
+          '   1. Voice → Whisper (transcription)\n' +
+          '   2. Text → Chat Model (AI response)'
+        );
+        return;
+      }
+      
       const account = {
         name: document.getElementById('account-name').value,
         type: document.getElementById('account-type').value,
@@ -1652,6 +1911,7 @@
             <div class="logs-header">
               <h2>Application Logs</h2>
               <div class="logs-controls">
+                <button id="logs-copy" class="logs-copy-btn">📋 Copy Logs</button>
                 <button id="logs-clear" class="logs-clear-btn">Clear Logs</button>
                 <button id="logs-close" class="logs-close-btn">× Close</button>
               </div>
@@ -1678,6 +1938,10 @@
       
       document.getElementById('logs-close').addEventListener('click', () => {
         this.hide();
+      });
+      
+      document.getElementById('logs-copy').addEventListener('click', () => {
+        this.copyLogs();
       });
       
       document.getElementById('logs-clear').addEventListener('click', () => {
@@ -1910,12 +2174,62 @@
       const providerConfig = config.accounts.find(acc => acc.name === currentProviderId);
       if (!providerConfig) {
         chatUI.addMessage('assistant', `Error: Provider "${currentProviderId}" not found.`);
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Chat failed: Provider "${currentProviderId}" not found`, null, {
+            source: 'Chat',
+            action: 'provider_not_found',
+            providerId: currentProviderId
+          });
+        }
+        return;
+      }
+      
+      // Validate that the provider doesn't have a Whisper model (should use chat models)
+      const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
+      if (providerConfig.model && whisperModels.includes(providerConfig.model)) {
+        const errorMsg = `❌ Error: The selected provider "${providerConfig.name}" is configured with Whisper model "${providerConfig.model}"\n\n` +
+          `⚠️ Whisper models are for audio transcription ONLY, not chat!\n\n` +
+          `🔧 Quick Fix:\n` +
+          `1. Go to Settings → AI Accounts\n` +
+          `2. Edit the account "${providerConfig.name}"\n` +
+          `3. Change the model to a chat model:\n` +
+          `   • Groq: "llama-3.1-8b-instant" (recommended - fast & affordable)\n` +
+          `   • Groq: "llama-3.3-70b-versatile" (more powerful)\n` +
+          `   • OpenAI: "gpt-4" or "gpt-3.5-turbo"\n\n` +
+          `💡 Remember:\n` +
+          `   • Chat Models = Used for AI conversations (set in AI Accounts)\n` +
+          `   • Whisper Models = Used for voice transcription (set in Voice Input settings)\n\n` +
+          `The provider dropdown will automatically filter out Whisper models after you fix this.`;
+        
+        chatUI.messages[loadingIndex].content = errorMsg;
+        chatUI.rerenderMessages();
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `❌ Chat blocked: Account "${providerConfig.name}" uses Whisper model "${providerConfig.model}"`, null, {
+            source: 'Chat',
+            action: 'whisper_model_blocked',
+            accountName: providerConfig.name,
+            model: providerConfig.model,
+            providerType: providerConfig.type,
+            fix: 'Edit account in Settings → AI Accounts → Change model to chat model'
+          });
+        }
         return;
       }
       
       // Show loading message
       chatUI.addMessage('assistant', 'Thinking...');
       const loadingIndex = chatUI.messages.length - 1;
+      
+      if (window.logsPanel) {
+        window.logsPanel.addLog('info', `Sending message to AI: provider="${providerConfig.name}", model="${providerConfig.model || 'default'}"`, null, {
+          source: 'Chat',
+          action: 'sending_to_ai',
+          provider: providerConfig.name,
+          providerType: providerConfig.type,
+          chatModel: providerConfig.model
+        });
+      }
       
       // Prepare messages array
       const messages = chatUI.messages
@@ -2043,25 +2357,89 @@
     selector.innerHTML = '<option value="">No provider</option>';
     
     if (config.accounts && config.accounts.length > 0) {
-      config.accounts.forEach(acc => {
+      // Filter out accounts with Whisper models (they can't be used for chat)
+      const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
+      const validAccounts = config.accounts.filter(acc => {
+        if (!acc.model) return true; // No model set, allow it
+        return !whisperModels.includes(acc.model);
+      });
+      
+      validAccounts.forEach(acc => {
         const option = document.createElement('option');
         option.value = acc.name;
-        option.textContent = acc.name;
+        option.textContent = acc.name + (acc.model ? ` (${acc.model})` : '');
         selector.appendChild(option);
       });
       
-      if (!currentProviderId && config.accounts.length > 0) {
-        currentProviderId = config.accounts[0].name;
+      if (!currentProviderId && validAccounts.length > 0) {
+        currentProviderId = validAccounts[0].name;
         selector.value = currentProviderId;
       } else if (currentProviderId) {
-        selector.value = currentProviderId;
+        // Check if current provider is still valid
+        const isValid = validAccounts.some(acc => acc.name === currentProviderId);
+        if (!isValid) {
+          // Current provider has Whisper model, switch to first valid one
+          if (validAccounts.length > 0) {
+            currentProviderId = validAccounts[0].name;
+            selector.value = currentProviderId;
+            if (window.logsPanel) {
+              window.logsPanel.addLog('warn', `Current provider has Whisper model. Switched to "${currentProviderId}" for chat.`, null, {
+                source: 'Chat',
+                action: 'provider_switched_from_whisper'
+              });
+            }
+          } else {
+            currentProviderId = null;
+          }
+        } else {
+          selector.value = currentProviderId;
+        }
       }
     }
     
-    // Handle selector change
-    selector.addEventListener('change', (e) => {
-      currentProviderId = e.target.value || null;
-    });
+    // Handle selector change - remove old listeners first
+    const newSelector = selector.cloneNode(true);
+    selector.parentNode.replaceChild(newSelector, selector);
+    const updatedSelector = document.getElementById('provider-selector');
+    
+    if (updatedSelector) {
+      updatedSelector.addEventListener('change', (e) => {
+        const selectedValue = e.target.value || null;
+        const selectedOption = e.target.options[e.target.selectedIndex];
+        
+        // Prevent selecting disabled (Whisper model) accounts
+        if (selectedOption && selectedOption.disabled) {
+          alert('This account uses a Whisper model, which is for audio transcription only.\n\nPlease edit this account in Settings → AI Accounts and change the model to a chat model (e.g., llama-3.1-8b-instant).');
+          // Reset to previous selection or first valid
+          const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
+          const validAccounts = config.accounts.filter(acc => {
+            if (!acc.model) return true;
+            return !whisperModels.includes(acc.model);
+          });
+          if (validAccounts.length > 0) {
+            updatedSelector.value = currentProviderId || validAccounts[0].name;
+          } else {
+            updatedSelector.value = '';
+          }
+          return;
+        }
+        
+        currentProviderId = selectedValue;
+        window.currentProviderId = currentProviderId;
+        
+        if (window.logsPanel && currentProviderId) {
+          const selectedAccount = config.accounts.find(acc => acc.name === currentProviderId);
+          if (selectedAccount) {
+            window.logsPanel.addLog('info', `Chat provider changed to: ${currentProviderId} (${selectedAccount.model || 'default model'})`, null, {
+              source: 'Chat',
+              action: 'provider_changed',
+              provider: currentProviderId,
+              model: selectedAccount.model
+            });
+          }
+        }
+      });
+    }
   }
   
   async function loadConfig() {
@@ -2320,11 +2698,15 @@
     return div.innerHTML;
   }
   
-  // Expose functions for settings panel
-  window.loadConfig = loadConfig;
-  window.setupProviderSelector = setupProviderSelector;
-  window.currentProviderId = () => currentProviderId;
-  window.setCurrentProviderId = (id) => { currentProviderId = id; };
+    // Expose functions for settings panel
+    window.loadConfig = loadConfig;
+    window.setupProviderSelector = setupProviderSelector;
+    window.currentProviderId = currentProviderId; // Expose as property for easy access
+    window.getCurrentProviderId = () => currentProviderId;
+    window.setCurrentProviderId = (id) => { 
+      currentProviderId = id; 
+      window.currentProviderId = id; // Keep in sync
+    };
   
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {

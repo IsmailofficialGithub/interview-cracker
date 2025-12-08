@@ -524,14 +524,26 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       const tempDir = app.getPath('temp');
       let tempFile = path.join(tempDir, `audio-${Date.now()}.webm`);
       
-      // audioData should be a Buffer
+      // audioData can be Buffer, Uint8Array, or ArrayBuffer from renderer
+      let audioBuffer;
       if (Buffer.isBuffer(audioData)) {
-        fs.writeFileSync(tempFile, audioData);
+        audioBuffer = audioData;
+      } else if (audioData instanceof Uint8Array) {
+        // Convert Uint8Array to Buffer
+        audioBuffer = Buffer.from(audioData);
+      } else if (audioData instanceof ArrayBuffer) {
+        // Convert ArrayBuffer to Buffer
+        audioBuffer = Buffer.from(audioData);
       } else if (typeof audioData === 'string') {
         // Assume it's a file path
         tempFile = audioData;
       } else {
-        return { success: false, error: 'Invalid audio data format' };
+        return { success: false, error: 'Invalid audio data format. Expected Buffer, Uint8Array, or ArrayBuffer.' };
+      }
+      
+      // Write audio buffer to file if not using file path
+      if (audioBuffer) {
+        fs.writeFileSync(tempFile, audioBuffer);
       }
       
       // Verify file exists and has content
@@ -547,6 +559,9 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       
       let transcriptionText = '';
       
+      // Log transcription start
+      securityMonitor.logInfo(`Starting audio transcription: provider=${providerType}, model=${model}, fileSize=${stats.size} bytes`);
+      
       if (providerType === 'groq') {
         // Use Groq SDK for transcription (as per user's code example)
         const Groq = require('groq-sdk');
@@ -556,6 +571,9 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         const groqWhisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo'];
         const whisperModel = (model && groqWhisperModels.includes(model)) ? model : 'whisper-large-v3-turbo';
         
+        securityMonitor.logInfo(`Calling Groq Whisper API: model=${whisperModel}`);
+        const apiStartTime = Date.now();
+        
         try {
           const transcription = await groq.audio.transcriptions.create({
             file: fs.createReadStream(tempFile),
@@ -563,6 +581,9 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
             temperature: 0,
             response_format: 'text'
           });
+          
+          const apiDuration = Date.now() - apiStartTime;
+          securityMonitor.logInfo(`Groq Whisper API response received in ${apiDuration}ms`);
           
           // Groq SDK returns text directly when response_format is 'text'
           // If it's an object, extract the text property
@@ -573,7 +594,10 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           } else {
             transcriptionText = String(transcription);
           }
+          
+          securityMonitor.logInfo(`Groq transcription successful: textLength=${transcriptionText.length} chars, duration=${apiDuration}ms`);
         } catch (groqError) {
+          const apiDuration = Date.now() - apiStartTime;
           // Clean up temp file on error
           try {
             if (fs.existsSync(tempFile)) {
@@ -587,10 +611,21 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           if (groqError.response && groqError.response.data) {
             errorMessage = groqError.response.data.error?.message || errorMessage;
           }
+          
+          securityMonitor.logError(new Error(`Groq transcription failed after ${apiDuration}ms: ${errorMessage}`), {
+            provider: 'groq',
+            model: whisperModel,
+            duration: apiDuration,
+            error: errorMessage
+          });
+          
           return { success: false, error: errorMessage };
         }
       } else {
         // Use OpenAI API (axios for compatibility)
+        securityMonitor.logInfo(`Calling OpenAI Whisper API: model=${model || 'whisper-1'}`);
+        const apiStartTime = Date.now();
+        
         const form = new FormData();
         form.append('file', fs.createReadStream(tempFile), {
           filename: 'audio.webm',
@@ -599,39 +634,73 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         form.append('model', 'whisper-1');
         form.append('language', 'en');
         
-        const response = await axios.post(
-          'https://api.openai.com/v1/audio/transcriptions',
-          form,
-          {
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              ...form.getHeaders()
-            },
-            timeout: 60000, // 60 seconds for audio processing
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity
+        try {
+          const response = await axios.post(
+            'https://api.openai.com/v1/audio/transcriptions',
+            form,
+            {
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                ...form.getHeaders()
+              },
+              timeout: 60000, // 60 seconds for audio processing
+              maxContentLength: Infinity,
+              maxBodyLength: Infinity
+            }
+          );
+          
+          const apiDuration = Date.now() - apiStartTime;
+          transcriptionText = response.data.text;
+          
+          securityMonitor.logInfo(`OpenAI transcription successful: textLength=${transcriptionText.length} chars, duration=${apiDuration}ms`);
+        } catch (openaiError) {
+          const apiDuration = Date.now() - apiStartTime;
+          let errorMessage = openaiError.message || 'Unknown OpenAI transcription error';
+          
+          if (openaiError.response && openaiError.response.data) {
+            errorMessage = openaiError.response.data.error?.message || errorMessage;
           }
-        );
-        
-        transcriptionText = response.data.text;
+          
+          securityMonitor.logError(new Error(`OpenAI transcription failed after ${apiDuration}ms: ${errorMessage}`), {
+            provider: 'openai',
+            model: model || 'whisper-1',
+            duration: apiDuration,
+            error: errorMessage
+          });
+          
+          // Clean up temp file on error
+          try {
+            if (fs.existsSync(tempFile)) {
+              fs.unlinkSync(tempFile);
+            }
+          } catch (e) {
+            console.error('Failed to delete temp audio file:', e);
+          }
+          
+          return { success: false, error: errorMessage };
+        }
       }
       
       // Clean up temp file
       try {
         if (fs.existsSync(tempFile)) {
           fs.unlinkSync(tempFile);
+          securityMonitor.logInfo(`Temporary audio file cleaned up: ${tempFile}`);
         }
       } catch (e) {
         // Ignore cleanup errors
         console.error('Failed to cleanup temp file:', e);
+        securityMonitor.logError(new Error(`Failed to cleanup temp file: ${e.message}`));
       }
       
       if (transcriptionText) {
+        securityMonitor.logInfo(`Transcription completed successfully: ${transcriptionText.length} characters`);
         return {
           success: true,
           text: transcriptionText
         };
       } else {
+        securityMonitor.logError(new Error('No transcription text returned from API'));
         return {
           success: false,
           error: 'No transcription returned from API'

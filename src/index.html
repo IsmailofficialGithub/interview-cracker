@@ -635,7 +635,7 @@
       gap: 8px;
     }
     
-    .logs-clear-btn, .logs-close-btn {
+    .logs-copy-btn, .logs-clear-btn, .logs-close-btn {
       background: #333;
       border: 1px solid #444;
       color: #e0e0e0;
@@ -643,6 +643,12 @@
       border-radius: 4px;
       cursor: pointer;
       font-size: 14px;
+      transition: background 0.2s, transform 0.1s;
+    }
+    
+    .logs-copy-btn:hover {
+      background: #0066cc;
+      border-color: #0066cc;
     }
     
     .logs-clear-btn:hover {
@@ -652,6 +658,10 @@
     
     .logs-close-btn:hover {
       background: #3a3a3a;
+    }
+    
+    .logs-copy-btn:active {
+      transform: scale(0.98);
     }
     
     .logs-body {

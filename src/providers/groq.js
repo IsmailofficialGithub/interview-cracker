@@ -55,9 +55,9 @@ class GroqProvider extends BaseProvider {
           console.warn(`⚠️ Model "${this.model}" has been deprecated. Please use a current model like "llama-3.1-8b-instant" or "llama-3.3-70b-versatile".`);
         }
         
-        // Warn if using Whisper model for chat (they're audio-only)
+        // Block Whisper models for chat completions (they're audio-only)
         if (whisperModels.includes(this.model)) {
-          console.warn(`⚠️ Model "${this.model}" is for audio transcription only, not chat completions. Use it in Voice Input settings, not for chat.`);
+          throw new Error(`Model "${this.model}" is for audio transcription only, not chat completions. Use it in Voice Input settings, not for chat. Please select a chat model like "llama-3.1-8b-instant" or "llama-3.3-70b-versatile" for this account.`);
         }
         
         // Warn if model doesn't match known models (but don't block, in case of new models)
