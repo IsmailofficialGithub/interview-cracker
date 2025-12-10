@@ -1129,48 +1129,9 @@
         throw new Error('No audio stream available for chunking');
       }
       
-      // Create MediaRecorder with 2-3 second chunks
-      this.realTimeMediaRecorder = new MediaRecorder(this.mergedStream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
-      
-      this.realTimeMediaRecorder.ondataavailable = async (event) => {
-        if (!this.isRealTimeListening || event.data.size === 0) {
-          return;
-        }
-        
-        const chunkId = `chunk-${Date.now()}-${++this.chunkCounter}`;
-        if (!this.realtimeStats) {
-          this.realtimeStats = { chunks: 0, transcriptions: 0, aiResponses: 0 };
-        }
-        this.realtimeStats.chunks++;
-        this.updateRealtimeStats();
-        
-        if (window.logsPanel) {
-          window.logsPanel.addLog('info', `Audio chunk received (${event.data.size} bytes, ID: ${chunkId})`, null, {
-            source: 'RealTimeListening',
-            action: 'chunk_received',
-            chunkId: chunkId,
-            chunkSize: event.data.size,
-            chunkNumber: this.chunkCounter
-          });
-        }
-        
-        // Process chunk asynchronously
-        this.processAudioChunk(event.data, chunkId).catch(error => {
-          if (window.logsPanel) {
-            window.logsPanel.addLog('error', `Error processing chunk ${chunkId}: ${error.message}`, error.stack, {
-              source: 'RealTimeListening',
-              action: 'chunk_process_error',
-              chunkId: chunkId,
-              error: error.message
-            });
-          }
-        });
-      };
-      
-      // Start recording with 2-second chunks
-      this.realTimeMediaRecorder.start(2000);
+      // Use a recursive function to record, stop, process, and restart
+      // This ensures each blob is a complete, valid WebM file
+      this.recordNextChunk();
       
       if (window.logsPanel) {
         window.logsPanel.addLog('info', 'Real-time audio chunking started (2s intervals)', null, {
@@ -1178,6 +1139,204 @@
           action: 'chunking_started',
           interval: 2000
         });
+      }
+    }
+    
+    async recordNextChunk() {
+      // Stop if listening was stopped
+      if (!this.isRealTimeListening || !this.mergedStream) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('warn', 'recordNextChunk: Listening stopped or no stream', null, {
+            source: 'RealTimeListening',
+            action: 'record_aborted',
+            isRealTimeListening: this.isRealTimeListening,
+            hasStream: !!this.mergedStream
+          });
+        }
+        return;
+      }
+      
+      try {
+        // Create a new MediaRecorder for each chunk to ensure complete files
+        // Try preferred mimeType first, fallback to default
+        let mimeType = 'audio/webm;codecs=opus';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          // Try alternatives
+          if (MediaRecorder.isTypeSupported('audio/webm')) {
+            mimeType = 'audio/webm';
+          } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+            mimeType = 'audio/ogg;codecs=opus';
+          } else {
+            // Use default
+            mimeType = '';
+          }
+        }
+        
+        this.realTimeMediaRecorder = new MediaRecorder(this.mergedStream, mimeType ? { mimeType } : {});
+        
+        const chunkId = `chunk-${Date.now()}-${++this.chunkCounter}`;
+        let chunkBlob = null;
+        let dataResolved = false;
+        
+        // Wait for data to be available with timeout
+        const dataPromise = new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            if (!dataResolved) {
+              dataResolved = true;
+              reject(new Error('Timeout waiting for audio data'));
+            }
+          }, 3000); // 3 second timeout
+          
+          this.realTimeMediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              chunkBlob = event.data;
+              if (!dataResolved) {
+                dataResolved = true;
+                clearTimeout(timeout);
+                resolve();
+              }
+            }
+          };
+          
+          // Also listen for stop event as backup
+          this.realTimeMediaRecorder.onstop = () => {
+            // If we haven't received data yet, try to resolve anyway
+            if (!dataResolved && chunkBlob) {
+              dataResolved = true;
+              clearTimeout(timeout);
+              resolve();
+            } else if (!dataResolved) {
+              // No data received, resolve with null
+              setTimeout(() => {
+                if (!dataResolved) {
+                  dataResolved = true;
+                  clearTimeout(timeout);
+                  resolve();
+                }
+              }, 100);
+            }
+          };
+          
+          this.realTimeMediaRecorder.onerror = (event) => {
+            if (!dataResolved) {
+              dataResolved = true;
+              clearTimeout(timeout);
+              reject(new Error(event.error || 'MediaRecorder error'));
+            }
+          };
+        });
+        
+        // Start recording
+        this.realTimeMediaRecorder.start();
+        
+        // Wait for recorder to actually start (should be immediate, but just in case)
+        let startWaitTime = 0;
+        while (this.realTimeMediaRecorder.state === 'inactive' && startWaitTime < 500) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+          startWaitTime += 50;
+        }
+        
+        if (this.realTimeMediaRecorder.state !== 'recording') {
+          throw new Error(`MediaRecorder failed to start. State: ${this.realTimeMediaRecorder.state}`);
+        }
+        
+        // Record for 2 seconds
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Request data before stopping to ensure we get the chunk
+        if (this.realTimeMediaRecorder && this.realTimeMediaRecorder.state === 'recording') {
+          this.realTimeMediaRecorder.requestData();
+          // Small delay to let requestData process
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        
+        // Stop the recorder
+        if (this.realTimeMediaRecorder && this.realTimeMediaRecorder.state !== 'inactive') {
+          this.realTimeMediaRecorder.stop();
+        }
+        
+        // Wait for the data to be available (with timeout)
+        try {
+          await dataPromise;
+        } catch (error) {
+          if (window.logsPanel) {
+            window.logsPanel.addLog('warn', `Timeout or error waiting for chunk data: ${error.message}`, null, {
+              source: 'RealTimeListening',
+              action: 'chunk_timeout',
+              chunkId: chunkId,
+              error: error.message
+            });
+          }
+          // Continue to next chunk even if this one failed
+        }
+        
+        // Process the chunk if we got valid data
+        if (chunkBlob && chunkBlob.size > 0 && this.isRealTimeListening) {
+          if (!this.realtimeStats) {
+            this.realtimeStats = { chunks: 0, transcriptions: 0, aiResponses: 0 };
+          }
+          this.realtimeStats.chunks++;
+          this.updateRealtimeStats();
+          
+          if (window.logsPanel) {
+            window.logsPanel.addLog('info', `Audio chunk received (${chunkBlob.size} bytes, ID: ${chunkId})`, null, {
+              source: 'RealTimeListening',
+              action: 'chunk_received',
+              chunkId: chunkId,
+              chunkSize: chunkBlob.size,
+              chunkNumber: this.chunkCounter
+            });
+          }
+          
+          // Process chunk asynchronously (don't await to allow next recording to start)
+          this.processAudioChunk(chunkBlob, chunkId).catch(error => {
+            if (window.logsPanel) {
+              window.logsPanel.addLog('error', `Error processing chunk ${chunkId}: ${error.message}`, error.stack, {
+                source: 'RealTimeListening',
+                action: 'chunk_process_error',
+                chunkId: chunkId,
+                error: error.message
+              });
+            }
+          });
+        } else if (this.isRealTimeListening) {
+          // No data received, but continue recording
+          if (window.logsPanel) {
+            window.logsPanel.addLog('warn', `No audio data received for chunk ${chunkId}`, null, {
+              source: 'RealTimeListening',
+              action: 'chunk_empty',
+              chunkId: chunkId
+            });
+          }
+        }
+      } catch (error) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Error in recordNextChunk: ${error.message}`, error.stack, {
+            source: 'RealTimeListening',
+            action: 'record_error',
+            error: error.message
+          });
+        }
+      } finally {
+        // Clean up the recorder
+        if (this.realTimeMediaRecorder) {
+          try {
+            if (this.realTimeMediaRecorder.state !== 'inactive') {
+              this.realTimeMediaRecorder.stop();
+            }
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+          this.realTimeMediaRecorder = null;
+        }
+        
+        // Schedule next chunk recording
+        if (this.isRealTimeListening) {
+          // Small delay before next recording to avoid overlap
+          setTimeout(() => {
+            this.recordNextChunk();
+          }, 100);
+        }
       }
     }
     
@@ -2953,7 +3112,7 @@
       this.renderLogs();
     }
     
-    copyLogs() {
+    async copyLogs() {
       try {
         const logsText = this.logs.map(log => {
           const level = log.level.toUpperCase().padEnd(8);
@@ -2976,24 +3135,71 @@
           return text;
         }).join('\n\n');
         
-        // Copy to clipboard
-        navigator.clipboard.writeText(logsText).then(() => {
-          // Show feedback
-          const copyBtn = document.getElementById('logs-copy');
-          if (copyBtn) {
-            const originalText = copyBtn.textContent;
-            copyBtn.textContent = '✓ Copied!';
-            setTimeout(() => {
-              copyBtn.textContent = originalText;
-            }, 2000);
+        // Try to focus the window first (required for clipboard API)
+        if (window.electronAPI && window.electronAPI.bringWindowToFront) {
+          try {
+            await window.electronAPI.bringWindowToFront();
+            // Small delay to ensure focus
+            await new Promise(resolve => setTimeout(resolve, 100));
+          } catch (e) {
+            // Ignore focus errors
           }
-        }).catch(err => {
-          console.error('Failed to copy logs:', err);
-          alert('Failed to copy logs to clipboard. Please select and copy manually.');
-        });
+        }
+        
+        // Try modern clipboard API first
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          try {
+            await navigator.clipboard.writeText(logsText);
+            // Show feedback
+            const copyBtn = document.getElementById('logs-copy');
+            if (copyBtn) {
+              const originalText = copyBtn.textContent;
+              copyBtn.textContent = '✓ Copied!';
+              setTimeout(() => {
+                copyBtn.textContent = originalText;
+              }, 2000);
+            }
+            return;
+          } catch (err) {
+            // Fall through to fallback method
+            console.warn('Clipboard API failed, trying fallback:', err);
+          }
+        }
+        
+        // Fallback: Use execCommand (works even when not focused)
+        const textArea = document.createElement('textarea');
+        textArea.value = logsText;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+          const successful = document.execCommand('copy');
+          document.body.removeChild(textArea);
+          
+          if (successful) {
+            // Show feedback
+            const copyBtn = document.getElementById('logs-copy');
+            if (copyBtn) {
+              const originalText = copyBtn.textContent;
+              copyBtn.textContent = '✓ Copied!';
+              setTimeout(() => {
+                copyBtn.textContent = originalText;
+              }, 2000);
+            }
+          } else {
+            throw new Error('execCommand copy failed');
+          }
+        } catch (err) {
+          document.body.removeChild(textArea);
+          throw err;
+        }
       } catch (error) {
         console.error('Error copying logs:', error);
-        alert('Error copying logs: ' + error.message);
+        alert('Failed to copy logs to clipboard. Please select and copy manually from the logs panel.');
       }
     }
     
