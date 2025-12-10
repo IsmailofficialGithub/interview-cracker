@@ -35,6 +35,7 @@ function createWindow() {
       preload: path.join(__dirname, '../preload/preload.js'), // Preload script
       webSecurity: true, // Security: Enable web security
       allowRunningInsecureContent: false,
+      webviewTag: true, // Enable webview tag for in-built browser
     },
     show: false, // Don't show until ready
     frame: true,

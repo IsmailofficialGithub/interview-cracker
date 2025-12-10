@@ -84,7 +84,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   transcribeAudio: (audioData, apiKey, providerType, model) => ipcRenderer.invoke('transcribe-audio', audioData, apiKey, providerType, model),
   
   // Utility: Markdown renderer
-  renderMarkdown: (text) => marked.parse(text)
+  renderMarkdown: (text) => marked.parse(text),
+  
+  // App control
+  quitApp: () => ipcRenderer.invoke('quit-app'),
+  
+  // Desktop capture
+  getDesktopSources: (options) => ipcRenderer.invoke('get-desktop-sources', options),
+  
+  // Browser windows
+  createBrowserWindow: (options) => ipcRenderer.invoke('create-browser-window', options)
 });
 
 // Log that preload script loaded (for debugging)

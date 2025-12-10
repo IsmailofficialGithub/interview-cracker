@@ -26,12 +26,44 @@
       this.currentChatId = 'default';
       this.autoSaveTimer = null;
       this.isBlurred = false;
+      
+      // Real-time listening state
+      this.isRealTimeListening = false;
+      this.desktopStream = null;
+      this.micStream = null;
+      this.mergedStream = null;
+      this.audioContext = null;
+      this.conversationHistory = [];
+      this.activeTranscriptions = new Map(); // chunkId -> promise
+      this.activeAIRequests = new Map(); // requestId -> promise
+      this.transcriptionAccumulator = '';
+      this.lastTranscriptionTime = null;
+      this.chunkCounter = 0;
+      this.realTimeMediaRecorder = null;
+      this.realtimeStats = {
+        chunks: 0,
+        transcriptions: 0,
+        aiResponses: 0
+      };
     }
     
     initialize() {
       this.chatContainer = document.getElementById('chat-messages');
       this.inputArea = document.getElementById('message-input');
       this.sendButton = document.getElementById('send-button');
+      
+      // Real-time listening UI elements
+      this.realtimePanel = document.getElementById('realtime-transcription-panel');
+      this.realtimeTranscriptionEl = document.getElementById('realtime-live-transcription');
+      this.realtimeAIResponseEl = document.getElementById('realtime-ai-response');
+      
+      // Stop button for real-time panel
+      const realtimeStopBtn = document.getElementById('realtime-stop-btn');
+      if (realtimeStopBtn) {
+        realtimeStopBtn.addEventListener('click', () => {
+          this.stopRealTimeListening();
+        });
+      }
       
       if (!this.chatContainer || !this.inputArea || !this.sendButton) {
         console.error('Chat UI elements not found');
@@ -347,12 +379,15 @@
       this.listenButton.textContent = '🎤 Listen';
       this.listenButton.title = 'Start voice input with OpenAI Whisper (CTRL+L)';
       
-      // Listen button click
-      this.listenButton.addEventListener('click', () => {
-        if (this.isRecording) {
+      // Listen button click - always use real-time listening
+      this.listenButton.addEventListener('click', async () => {
+        if (this.isRealTimeListening) {
+          await this.stopRealTimeListening();
+        } else if (this.isRecording) {
           this.stopWhisperRecording();
         } else {
-          this.startWhisperRecording();
+          // Always start real-time listening for continuous transcription and AI responses
+          await this.startRealTimeListening();
         }
       });
       
@@ -821,6 +856,852 @@
       window.dispatchEvent(new CustomEvent('chat-send-message', {
         detail: { content: text }
       }));
+    }
+    
+    // Real-time Listening Methods
+    
+    async getDesktopAudioStream() {
+      try {
+        // Try getDisplayMedia first (works in Electron)
+        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+          if (window.logsPanel) {
+            window.logsPanel.addLog('info', 'Requesting desktop audio capture via getDisplayMedia...', null, {
+              source: 'RealTimeListening',
+              action: 'request_desktop_capture'
+            });
+          }
+          
+          const stream = await navigator.mediaDevices.getDisplayMedia({
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              suppressLocalAudioPlayback: false
+            },
+            video: true // Required even if we only want audio
+          });
+          
+          // Check if stream has audio tracks
+          const audioTracks = stream.getAudioTracks();
+          if (audioTracks.length > 0) {
+            if (window.logsPanel) {
+              window.logsPanel.addLog('success', `Desktop audio capture successful (${audioTracks.length} audio track(s))`, null, {
+                source: 'RealTimeListening',
+                action: 'desktop_capture_success',
+                audioTracks: audioTracks.length
+              });
+            }
+            return stream;
+          } else {
+            // No audio tracks, but we have the stream
+            if (window.logsPanel) {
+              window.logsPanel.addLog('warn', 'Desktop capture stream has no audio tracks, but continuing...', null, {
+                source: 'RealTimeListening',
+                action: 'no_audio_tracks'
+              });
+            }
+            return stream; // Return anyway, might work
+          }
+        } else {
+          throw new Error('getDisplayMedia not available');
+        }
+      } catch (error) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Failed to get desktop audio: ${error.message}`, error.stack, {
+            source: 'RealTimeListening',
+            action: 'desktop_capture_error',
+            error: error.message
+          });
+        }
+        throw error;
+      }
+    }
+    
+    mergeAudioStreams(desktopStream, micStream) {
+      try {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        const desktopSource = this.audioContext.createMediaStreamSource(desktopStream);
+        const micSource = this.audioContext.createMediaStreamSource(micStream);
+        const destination = this.audioContext.createMediaStreamDestination();
+        
+        desktopSource.connect(destination);
+        micSource.connect(destination);
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('success', 'Audio streams merged successfully', null, {
+            source: 'RealTimeListening',
+            action: 'audio_streams_merged',
+            desktopTracks: desktopStream.getAudioTracks().length,
+            micTracks: micStream.getAudioTracks().length,
+            mergedTracks: destination.stream.getAudioTracks().length
+          });
+        }
+        
+        return destination.stream;
+      } catch (error) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Failed to merge audio streams: ${error.message}`, error.stack, {
+            source: 'RealTimeListening',
+            action: 'merge_error',
+            error: error.message
+          });
+        }
+        throw error;
+      }
+    }
+    
+    async startRealTimeListening() {
+      if (this.isRealTimeListening) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('warn', 'Real-time listening already active', null, {
+            source: 'RealTimeListening',
+            action: 'already_listening'
+          });
+        }
+        return;
+      }
+      
+      try {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', '🚀 Starting real-time listening...', null, {
+            source: 'RealTimeListening',
+            action: 'start_listening'
+          });
+        }
+        
+        // Check voice enabled
+        const configResult = await window.electronAPI.getConfig();
+        if (configResult.success && configResult.data) {
+          const settings = configResult.data.settings || {};
+          if (settings.voiceEnabled === false) {
+            this.showVoiceError('Voice input is disabled in Settings.');
+            return;
+          }
+        }
+        
+        // Get microphone stream
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', 'Requesting microphone access...', null, {
+            source: 'RealTimeListening',
+            action: 'request_microphone'
+          });
+        }
+        this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Get desktop audio stream
+        try {
+          this.desktopStream = await this.getDesktopAudioStream();
+          
+          // Handle stream stop event (user can stop sharing)
+          if (this.desktopStream) {
+            this.desktopStream.getTracks().forEach(track => {
+              track.onended = () => {
+                if (window.logsPanel) {
+                  window.logsPanel.addLog('warn', 'Desktop audio track ended (user stopped sharing)', null, {
+                    source: 'RealTimeListening',
+                    action: 'desktop_track_ended'
+                  });
+                }
+                // Continue with mic only
+                this.desktopStream = null;
+                // Re-merge streams if needed
+                if (this.micStream && this.isRealTimeListening) {
+                  try {
+                    this.mergedStream = this.micStream;
+                    // Restart recording with new stream
+                    if (this.realTimeMediaRecorder) {
+                      this.realTimeMediaRecorder.stop();
+                    }
+                    this.startRealTimeChunking();
+                  } catch (e) {
+                    if (window.logsPanel) {
+                      window.logsPanel.addLog('error', `Failed to recover from desktop track end: ${e.message}`, e.stack, {
+                        source: 'RealTimeListening',
+                        action: 'recovery_error'
+                      });
+                    }
+                  }
+                }
+              };
+            });
+          }
+        } catch (desktopError) {
+          if (window.logsPanel) {
+            window.logsPanel.addLog('warn', `Desktop capture failed, continuing with microphone only: ${desktopError.message}`, null, {
+              source: 'RealTimeListening',
+              action: 'desktop_capture_fallback',
+              error: desktopError.message
+            });
+          }
+          // Continue with mic only
+          this.desktopStream = null;
+        }
+        
+        // Merge streams if both available
+        if (this.desktopStream && this.micStream) {
+          this.mergedStream = this.mergeAudioStreams(this.desktopStream, this.micStream);
+        } else if (this.micStream) {
+          this.mergedStream = this.micStream;
+        } else {
+          throw new Error('No audio streams available');
+        }
+        
+        // Initialize conversation state
+        this.conversationHistory = [];
+        this.transcriptionAccumulator = '';
+        this.chunkCounter = 0;
+        this.activeTranscriptions.clear();
+        this.activeAIRequests.clear();
+        // Reset stats
+        this.realtimeStats = {
+          chunks: 0,
+          transcriptions: 0,
+          aiResponses: 0
+        };
+        this.updateRealtimeStats();
+        
+        // Show status in voice status area
+        if (this.voiceStatusEl) {
+          this.voiceStatusEl.innerHTML = `
+            <div>🎤 Real-time Listening...</div>
+            <div class="voice-text" id="voice-transcript">Listening for audio from mic and speakers...</div>
+          `;
+          this.voiceStatusEl.classList.add('active');
+        }
+        
+        // Show message in chat that real-time listening started
+        this.addMessage('assistant', '🎤 Real-time listening started. Capturing audio from microphone and speakers...');
+        
+        // Start real-time chunking
+        this.startRealTimeChunking();
+        
+        this.isRealTimeListening = true;
+        
+        if (this.listenButton) {
+          this.listenButton.textContent = '🛑 Stop Listening';
+          this.listenButton.classList.add('listening');
+        }
+        
+        // Update menu buttons if visible
+        document.querySelectorAll('.menu-button').forEach(btn => {
+          if (btn.textContent.includes('Listen') || btn.id?.includes('listen')) {
+            btn.textContent = '🛑 Stop';
+            btn.classList.add('active');
+          }
+        });
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('success', '✅ Real-time listening started successfully', null, {
+            source: 'RealTimeListening',
+            action: 'listening_started',
+            hasDesktopAudio: !!this.desktopStream,
+            hasMicAudio: !!this.micStream
+          });
+        }
+        
+      } catch (error) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Failed to start real-time listening: ${error.message}`, error.stack, {
+            source: 'RealTimeListening',
+            action: 'start_error',
+            error: error.message,
+            errorName: error.name
+          });
+        }
+        
+        let errorMsg = 'Failed to start listening: ' + error.message;
+        if (error.name === 'NotAllowedError') {
+          errorMsg = 'Microphone permission denied. Please allow microphone access in your browser settings.';
+        } else if (error.name === 'NotFoundError') {
+          errorMsg = 'No microphone found. Please connect a microphone.';
+        } else if (error.name === 'NotReadableError') {
+          errorMsg = 'Microphone is being used by another application. Please close other apps using the microphone.';
+        }
+        
+        this.showVoiceError(errorMsg);
+        await this.cleanupRealTimeListening();
+      }
+    }
+    
+    startRealTimeChunking() {
+      if (!this.mergedStream) {
+        throw new Error('No audio stream available for chunking');
+      }
+      
+      // Create MediaRecorder with 2-3 second chunks
+      this.realTimeMediaRecorder = new MediaRecorder(this.mergedStream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      
+      this.realTimeMediaRecorder.ondataavailable = async (event) => {
+        if (!this.isRealTimeListening || event.data.size === 0) {
+          return;
+        }
+        
+        const chunkId = `chunk-${Date.now()}-${++this.chunkCounter}`;
+        if (!this.realtimeStats) {
+          this.realtimeStats = { chunks: 0, transcriptions: 0, aiResponses: 0 };
+        }
+        this.realtimeStats.chunks++;
+        this.updateRealtimeStats();
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', `Audio chunk received (${event.data.size} bytes, ID: ${chunkId})`, null, {
+            source: 'RealTimeListening',
+            action: 'chunk_received',
+            chunkId: chunkId,
+            chunkSize: event.data.size,
+            chunkNumber: this.chunkCounter
+          });
+        }
+        
+        // Process chunk asynchronously
+        this.processAudioChunk(event.data, chunkId).catch(error => {
+          if (window.logsPanel) {
+            window.logsPanel.addLog('error', `Error processing chunk ${chunkId}: ${error.message}`, error.stack, {
+              source: 'RealTimeListening',
+              action: 'chunk_process_error',
+              chunkId: chunkId,
+              error: error.message
+            });
+          }
+        });
+      };
+      
+      // Start recording with 2-second chunks
+      this.realTimeMediaRecorder.start(2000);
+      
+      if (window.logsPanel) {
+        window.logsPanel.addLog('info', 'Real-time audio chunking started (2s intervals)', null, {
+          source: 'RealTimeListening',
+          action: 'chunking_started',
+          interval: 2000
+        });
+      }
+    }
+    
+    async processAudioChunk(audioBlob, chunkId) {
+      try {
+        // Limit concurrent transcriptions (max 3)
+        if (this.activeTranscriptions.size >= 3) {
+          if (window.logsPanel) {
+            window.logsPanel.addLog('warn', `Too many active transcriptions, skipping chunk ${chunkId}`, null, {
+              source: 'RealTimeListening',
+              action: 'chunk_skipped',
+              chunkId: chunkId,
+              activeCount: this.activeTranscriptions.size
+            });
+          }
+          return;
+        }
+        
+        // Convert blob to Uint8Array
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        
+        // Get API account
+        const configResult = await window.electronAPI.getConfig();
+        if (!configResult.success || !configResult.data) {
+          throw new Error('Failed to load configuration');
+        }
+        
+        const accounts = configResult.data.accounts || [];
+        const settings = configResult.data.settings || {};
+        const preferredVoiceAPI = settings.voiceAPI || 'groq-whisper';
+        
+        let apiAccount = accounts.find(acc => {
+          if (preferredVoiceAPI === 'openai-whisper' && acc.type === 'openai' && acc.apiKey && acc.apiKey.trim() !== '') {
+            return true;
+          }
+          if (preferredVoiceAPI === 'groq-whisper' && acc.type === 'groq' && acc.apiKey && acc.apiKey.trim() !== '') {
+            return true;
+          }
+          if (acc.type === 'openai' && acc.apiKey && acc.apiKey.trim() !== '') return true;
+          if (acc.type === 'groq' && acc.apiKey && acc.apiKey.trim() !== '') return true;
+          return false;
+        });
+        
+        if (!apiAccount || !apiAccount.apiKey) {
+          throw new Error('No API key found for transcription');
+        }
+        
+        // Get Whisper model
+        let whisperModel = settings.whisperModel;
+        if (!whisperModel) {
+          if (apiAccount.type === 'groq') {
+            whisperModel = 'whisper-large-v3-turbo';
+          } else {
+            whisperModel = 'whisper-1';
+          }
+        }
+        
+        // Create transcription promise
+        const transcriptionPromise = window.electronAPI.transcribeAudio(
+          uint8Array,
+          apiAccount.apiKey,
+          apiAccount.type || 'openai',
+          whisperModel
+        );
+        
+        this.activeTranscriptions.set(chunkId, transcriptionPromise);
+        
+        const result = await transcriptionPromise;
+        
+        this.activeTranscriptions.delete(chunkId);
+        
+        if (result.success && result.text) {
+          const transcriptionText = result.text.trim();
+          
+          if (transcriptionText && transcriptionText.length > 0) {
+            if (window.logsPanel) {
+              window.logsPanel.addLog('success', `✅ Transcription (${chunkId}): "${transcriptionText.substring(0, 50)}..."`, null, {
+                source: 'RealTimeListening',
+                action: 'transcription_success',
+                chunkId: chunkId,
+                textLength: transcriptionText.length,
+                preview: transcriptionText.substring(0, 50)
+              });
+            }
+            
+            // Update transcription accumulator
+            this.transcriptionAccumulator += (this.transcriptionAccumulator ? ' ' : '') + transcriptionText;
+            this.lastTranscriptionTime = Date.now();
+            if (!this.realtimeStats) {
+              this.realtimeStats = { chunks: 0, transcriptions: 0, aiResponses: 0 };
+            }
+            this.realtimeStats.transcriptions++;
+            this.updateRealtimeStats();
+            
+            // Display live transcription preview
+            this.updateLiveTranscription(this.transcriptionAccumulator);
+            
+            // Send to AI immediately
+            await this.processTranscriptionChunk(transcriptionText, chunkId);
+          }
+        } else {
+          // Handle transcription failure
+          const errorMsg = result.error || 'Unknown error';
+          if (window.logsPanel) {
+            window.logsPanel.addLog('warn', `Transcription failed for chunk ${chunkId}: ${errorMsg}`, null, {
+              source: 'RealTimeListening',
+              action: 'transcription_failed',
+              chunkId: chunkId,
+              error: errorMsg
+            });
+          }
+          
+          // If it's a network error, log but continue (don't stop listening)
+          if (errorMsg.includes('network') || errorMsg.includes('timeout')) {
+            // Network errors are recoverable, continue listening
+            if (this.realtimeTranscriptionEl) {
+              const currentText = this.realtimeTranscriptionEl.textContent;
+              if (!currentText.includes('Network error')) {
+                this.realtimeTranscriptionEl.textContent = currentText + '\n[Network error - retrying...]';
+              }
+            }
+          }
+        }
+      } catch (error) {
+        this.activeTranscriptions.delete(chunkId);
+        
+        // Determine if error is recoverable
+        const isRecoverable = error.message.includes('network') || 
+                             error.message.includes('timeout') ||
+                             error.message.includes('ECONNRESET') ||
+                             error.message.includes('ETIMEDOUT');
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog(
+            isRecoverable ? 'warn' : 'error',
+            `Error processing audio chunk (${chunkId}): ${error.message}`, 
+            error.stack, 
+            {
+              source: 'RealTimeListening',
+              action: 'chunk_error',
+              chunkId: chunkId,
+              error: error.message,
+              errorName: error.name,
+              isRecoverable: isRecoverable
+            }
+          );
+        }
+        
+        // For recoverable errors, don't stop listening
+        if (!isRecoverable && !this.isRealTimeListening) {
+          // Non-recoverable error and listening stopped, show error
+          if (this.realtimeTranscriptionEl) {
+            this.realtimeTranscriptionEl.textContent = `Error: ${error.message}. Listening stopped.`;
+          }
+        }
+      }
+    }
+    
+    updateLiveTranscription(text) {
+      // Update voice status display with live transcription preview
+      if (this.voiceStatusEl) {
+        const transcriptEl = this.voiceStatusEl.querySelector('#voice-transcript') || 
+                           this.voiceStatusEl.querySelector('.voice-text');
+        if (transcriptEl) {
+          // Show preview of what's being transcribed (last 100 chars)
+          const preview = text && text.length > 100 
+            ? '...' + text.substring(text.length - 100)
+            : text || 'Listening...';
+          transcriptEl.textContent = preview;
+        }
+        this.voiceStatusEl.classList.add('active');
+      }
+    }
+    
+    updateRealtimeStats() {
+      if (!this.realtimeStats) {
+        this.realtimeStats = { chunks: 0, transcriptions: 0, aiResponses: 0 };
+      }
+      const chunkCountEl = document.getElementById('realtime-chunk-count');
+      const transcriptionCountEl = document.getElementById('realtime-transcription-count');
+      const aiCountEl = document.getElementById('realtime-ai-count');
+      
+      if (chunkCountEl) chunkCountEl.textContent = this.realtimeStats.chunks;
+      if (transcriptionCountEl) transcriptionCountEl.textContent = this.realtimeStats.transcriptions;
+      if (aiCountEl) aiCountEl.textContent = this.realtimeStats.aiResponses;
+    }
+    
+    async processTranscriptionChunk(transcriptionText, chunkId) {
+      if (!transcriptionText || !transcriptionText.trim()) {
+        return;
+      }
+      
+      try {
+        // Display transcribed text as user message in chat (left side)
+        this.addMessage('user', `🎤 ${transcriptionText}`);
+        
+        // Add to conversation history as user message
+        const userMessage = {
+          role: 'user',
+          content: transcriptionText,
+          timestamp: Date.now(),
+          chunkId: chunkId
+        };
+        
+        this.conversationHistory.push(userMessage);
+        
+        // Limit conversation history (keep last 20 messages)
+        if (this.conversationHistory.length > 20) {
+          this.conversationHistory = this.conversationHistory.slice(-20);
+        }
+        
+        // Check for AI provider - need to get config
+        const configResult = await window.electronAPI.getConfig();
+        if (!configResult.success || !configResult.data) {
+          if (window.logsPanel) {
+            window.logsPanel.addLog('warn', 'Failed to load config for real-time responses', null, {
+              source: 'RealTimeListening',
+              action: 'config_load_error'
+            });
+          }
+          return;
+        }
+        
+        const currentConfig = configResult.data;
+        if (!window.currentProviderId || !currentConfig || !currentConfig.accounts) {
+          if (window.logsPanel) {
+            window.logsPanel.addLog('warn', 'No AI provider configured for real-time responses', null, {
+              source: 'RealTimeListening',
+              action: 'no_provider'
+            });
+          }
+          return;
+        }
+        
+        const providerConfig = currentConfig.accounts.find(acc => acc.name === window.currentProviderId);
+        if (!providerConfig) {
+          return;
+        }
+        
+        // Cancel previous AI request if new chunk arrives (for real-time, we want latest)
+        if (this.activeAIRequests.size > 0) {
+          // For now, we'll queue requests instead of canceling
+          // Could implement cancellation if needed
+        }
+        
+        // Prepare messages for AI
+        const messages = this.conversationHistory.map(msg => ({
+          role: msg.role,
+          content: String(msg.content || '')
+        }));
+        
+        // Create AI request
+        const requestId = `ai-${Date.now()}-${chunkId}`;
+        const aiRequestPromise = (async () => {
+          // Add thinking indicator
+          this.addMessage('assistant', '🤔 Thinking...');
+          
+          const loadingIndex = this.messages.length - 1;
+          let fullContent = '';
+          
+          try {
+            const result = await window.electronAPI.sendAIMessageStream(
+              providerConfig,
+              messages,
+              (chunk) => {
+                fullContent += chunk;
+                // Update streaming message
+                if (this.messages[loadingIndex]) {
+                  this.messages[loadingIndex].content = fullContent;
+                  this.updateLastAssistantMessage(fullContent);
+                }
+              }
+            );
+            
+            if (result.success && result.content) {
+              // Message already updated by streaming
+              if (window.logsPanel) {
+                window.logsPanel.addLog('success', `✅ AI response for chunk ${chunkId}`, null, {
+                  source: 'RealTimeListening',
+                  action: 'ai_response_success',
+                  chunkId: chunkId,
+                  responseLength: result.content.length
+                });
+              }
+              
+              // Add to conversation history
+              this.conversationHistory.push({
+                role: 'assistant',
+                content: result.content,
+                timestamp: Date.now(),
+                requestId: requestId
+              });
+              
+              // Update stats
+              if (!this.realtimeStats) {
+                this.realtimeStats = { chunks: 0, transcriptions: 0, aiResponses: 0 };
+              }
+              this.realtimeStats.aiResponses++;
+              this.updateRealtimeStats();
+              
+              // Final update to ensure message is correct
+              if (this.messages[loadingIndex] && this.messages[loadingIndex].content !== result.content) {
+                this.messages[loadingIndex].content = result.content;
+                this.updateLastAssistantMessage(result.content);
+              }
+            } else {
+              // Error response
+              const errorMsg = result.error || 'Unknown error';
+              if (this.messages[loadingIndex]) {
+                this.messages[loadingIndex].content = `Error: ${errorMsg}`;
+                this.rerenderMessages();
+              }
+            }
+          } catch (error) {
+            if (this.messages[loadingIndex]) {
+              const errorMsg = error.message || 'Unknown error';
+              this.messages[loadingIndex].content = `Error: ${errorMsg}`;
+              this.rerenderMessages();
+            }
+            
+            
+            if (window.logsPanel) {
+              window.logsPanel.addLog('error', `AI request failed for chunk ${chunkId}: ${error.message}`, error.stack, {
+                source: 'RealTimeListening',
+                action: 'ai_request_error',
+                chunkId: chunkId,
+                error: error.message
+              });
+            }
+            
+            // Don't throw - continue listening even if AI request fails
+            // throw error;
+          }
+        })();
+        
+        this.activeAIRequests.set(requestId, aiRequestPromise);
+        
+        // Clean up when done
+        aiRequestPromise.finally(() => {
+          this.activeAIRequests.delete(requestId);
+        });
+        
+      } catch (error) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Error processing transcription chunk: ${error.message}`, error.stack, {
+            source: 'RealTimeListening',
+            action: 'process_chunk_error',
+            chunkId: chunkId,
+            error: error.message,
+            errorName: error.name
+          });
+        }
+        
+        // Show error in UI but continue listening
+        if (this.realtimeAIResponseEl) {
+          const currentText = this.realtimeAIResponseEl.textContent;
+          const errorText = `[Processing error: ${error.message}]`;
+          if (!currentText.includes(errorText)) {
+            this.realtimeAIResponseEl.textContent = (currentText || '') + '\n' + errorText;
+          }
+        }
+      }
+    }
+    
+    async stopRealTimeListening() {
+      if (!this.isRealTimeListening) {
+        return;
+      }
+      
+      if (window.logsPanel) {
+        window.logsPanel.addLog('info', '🛑 Stopping real-time listening...', null, {
+          source: 'RealTimeListening',
+          action: 'stop_listening'
+        });
+      }
+      
+      this.isRealTimeListening = false;
+      
+      // Stop MediaRecorder
+      if (this.realTimeMediaRecorder && this.realTimeMediaRecorder.state !== 'inactive') {
+        this.realTimeMediaRecorder.stop();
+      }
+      
+      // Wait for pending transcriptions (with timeout)
+      const maxWaitTime = 5000;
+      const startWait = Date.now();
+      while (this.activeTranscriptions.size > 0 && (Date.now() - startWait) < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Wait for pending AI requests (with timeout)
+      const aiStartWait = Date.now();
+      while (this.activeAIRequests.size > 0 && (Date.now() - aiStartWait) < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      await this.cleanupRealTimeListening();
+      
+      // Hide real-time panel
+      if (this.realtimePanel) {
+        this.realtimePanel.classList.remove('active');
+      }
+      
+      if (this.listenButton) {
+        this.listenButton.textContent = '🎤 Listen';
+        this.listenButton.classList.remove('listening');
+      }
+      
+      // Update menu buttons
+      document.querySelectorAll('.menu-button').forEach(btn => {
+        if (btn.textContent.includes('Stop') || btn.id?.includes('listen')) {
+          btn.textContent = 'Listen';
+          btn.classList.remove('active');
+        }
+      });
+      
+      // Show message in chat that listening stopped
+      this.addMessage('assistant', '🛑 Real-time listening stopped.');
+      
+      if (window.logsPanel) {
+        const stats = this.realtimeStats || { chunks: 0, transcriptions: 0, aiResponses: 0 };
+        window.logsPanel.addLog('success', '✅ Real-time listening stopped', null, {
+          source: 'RealTimeListening',
+          action: 'listening_stopped',
+          stats: stats
+        });
+      }
+    }
+    
+    async cleanupRealTimeListening() {
+      try {
+        // Stop all audio tracks
+        if (this.desktopStream) {
+          try {
+            this.desktopStream.getTracks().forEach(track => {
+              try {
+                track.stop();
+              } catch (e) {
+                // Track already stopped
+              }
+            });
+          } catch (e) {
+            // Ignore errors stopping tracks
+          }
+          this.desktopStream = null;
+        }
+        
+        if (this.micStream) {
+          try {
+            this.micStream.getTracks().forEach(track => {
+              try {
+                track.stop();
+              } catch (e) {
+                // Track already stopped
+              }
+            });
+          } catch (e) {
+            // Ignore errors stopping tracks
+          }
+          this.micStream = null;
+        }
+        
+        this.mergedStream = null;
+        
+        // Close audio context
+        if (this.audioContext) {
+          try {
+            if (this.audioContext.state !== 'closed') {
+              await this.audioContext.close();
+            }
+          } catch (e) {
+            // Context already closed or error closing
+            if (window.logsPanel) {
+              window.logsPanel.addLog('warn', `Error closing audio context: ${e.message}`, null, {
+                source: 'RealTimeListening',
+                action: 'audio_context_close_error'
+              });
+            }
+          }
+          this.audioContext = null;
+        }
+        
+        // Clear MediaRecorder
+        if (this.realTimeMediaRecorder) {
+          try {
+            if (this.realTimeMediaRecorder.state !== 'inactive') {
+              this.realTimeMediaRecorder.stop();
+            }
+          } catch (e) {
+            // Already stopped
+          }
+          this.realTimeMediaRecorder = null;
+        }
+        
+        // Clear state
+        this.transcriptionAccumulator = '';
+        this.lastTranscriptionTime = null;
+        
+        // Clear active requests (they'll finish on their own or timeout)
+        // Just clear the maps
+        this.activeTranscriptions.clear();
+        // Note: Don't clear activeAIRequests here, let them finish naturally
+        
+        // Clear UI
+        if (this.voiceStatusEl) {
+          this.voiceStatusEl.classList.remove('active');
+        }
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', 'Real-time listening cleanup completed', null, {
+            source: 'RealTimeListening',
+            action: 'cleanup_complete'
+          });
+        }
+      } catch (error) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Error during cleanup: ${error.message}`, error.stack, {
+            source: 'RealTimeListening',
+            action: 'cleanup_error',
+            error: error.message
+          });
+        }
+      }
     }
     
     async checkWhisperFallback() {
@@ -2072,6 +2953,50 @@
       this.renderLogs();
     }
     
+    copyLogs() {
+      try {
+        const logsText = this.logs.map(log => {
+          const level = log.level.toUpperCase().padEnd(8);
+          const time = new Date(log.timestamp).toLocaleString();
+          let text = `[${time}] ${level} ${log.message}`;
+          
+          if (log.stack) {
+            text += '\n' + log.stack;
+          }
+          
+          if (log.details && typeof log.details === 'object') {
+            try {
+              const detailsStr = JSON.stringify(log.details, null, 2);
+              text += '\n' + detailsStr;
+            } catch (e) {
+              text += '\n' + String(log.details);
+            }
+          }
+          
+          return text;
+        }).join('\n\n');
+        
+        // Copy to clipboard
+        navigator.clipboard.writeText(logsText).then(() => {
+          // Show feedback
+          const copyBtn = document.getElementById('logs-copy');
+          if (copyBtn) {
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = '✓ Copied!';
+            setTimeout(() => {
+              copyBtn.textContent = originalText;
+            }, 2000);
+          }
+        }).catch(err => {
+          console.error('Failed to copy logs:', err);
+          alert('Failed to copy logs to clipboard. Please select and copy manually.');
+        });
+      } catch (error) {
+        console.error('Error copying logs:', error);
+        alert('Error copying logs: ' + error.message);
+      }
+    }
+    
     saveLogs() {
       try {
         const logsToSave = this.logs.slice(-100);
@@ -2708,10 +3633,549 @@
       window.currentProviderId = id; // Keep in sync
     };
   
+  // Navigation Handler
+  function setupNavigation() {
+    // Landing page buttons
+    const landingListen = document.getElementById('menu-listen');
+    const landingMeeting = document.getElementById('menu-meeting');
+    const landingAsk = document.getElementById('menu-ask');
+    const landingScreenshot = document.getElementById('menu-screenshot');
+    const landingSettings = document.getElementById('menu-settings');
+    const landingQuit = document.getElementById('menu-quit');
+    
+    // Top menu buttons (in main view)
+    const topListen = document.getElementById('top-menu-listen');
+    const topMeeting = document.getElementById('top-menu-meeting');
+    const topAsk = document.getElementById('top-menu-ask');
+    const topScreenshot = document.getElementById('top-menu-screenshot');
+    const topSettings = document.getElementById('top-menu-settings');
+    const topQuit = document.getElementById('top-menu-quit');
+    
+    // Close view button
+    const closeViewBtn = document.getElementById('close-view');
+    
+    const landingView = document.getElementById('landing-view');
+    const mainView = document.getElementById('main-view');
+    const askView = document.getElementById('ask-view');
+    const chatView = document.getElementById('chat-view');
+    const askInput = document.getElementById('ask-input');
+    const askSendBtn = document.getElementById('ask-send-btn');
+    
+    function showView(viewName) {
+      landingView.style.display = 'none';
+      mainView.classList.add('active');
+      
+      // Hide all views
+      askView.style.display = 'none';
+      chatView.style.display = 'none';
+      
+      // Show selected view
+      if (viewName === 'ask') {
+        askView.style.display = 'flex';
+        // Auto-focus input
+        setTimeout(() => askInput?.focus(), 100);
+      } else if (viewName === 'chat') {
+        chatView.style.display = 'flex';
+      }
+      
+      // Update active buttons
+      document.querySelectorAll('.menu-button').forEach(btn => btn.classList.remove('active'));
+      if (viewName === 'ask') {
+        topAsk?.classList.add('active');
+        topScreenshot?.classList.add('active');
+      }
+    }
+    
+    function showLanding() {
+      mainView.classList.remove('active');
+      landingView.style.display = 'flex';
+    }
+    
+    // View switching handlers removed - using old UI
+    topSettings?.addEventListener('click', () => {
+      if (window.settingsPanel) {
+        window.settingsPanel.show();
+      }
+    });
+    topQuit?.addEventListener('click', () => {
+      if (window.electronAPI && window.electronAPI.quitApp) {
+        window.electronAPI.quitApp();
+      }
+    });
+    
+    // Close view button
+    closeViewBtn?.addEventListener('click', () => showLanding());
+    
+    // Ask view send handler
+    askSendBtn?.addEventListener('click', () => {
+      const text = askInput?.value.trim();
+      if (text) {
+        // Switch to chat view and send message
+        showView('chat');
+        // Trigger chat message
+        setTimeout(() => {
+          const messageInput = document.getElementById('message-input');
+          const sendButton = document.getElementById('send-button');
+          if (messageInput) {
+            messageInput.value = text;
+            // Trigger send
+            window.dispatchEvent(new CustomEvent('chat-send-message', {
+              detail: { content: text }
+            }));
+          }
+        }, 100);
+        askInput.value = '';
+      }
+    });
+    
+    // Ask input Enter key handler
+    askInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        askSendBtn?.click();
+      }
+    });
+    
+    // Auto-resize textarea
+    askInput?.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+    });
+    
+    // Context toggle
+    const contextToggle = document.getElementById('context-toggle');
+    contextToggle?.addEventListener('click', function() {
+      this.classList.toggle('active');
+      this.textContent = this.classList.contains('active') ? 'On' : 'Off';
+    });
+    
+    // Size buttons
+    ['small', 'medium', 'full'].forEach(size => {
+      const btn = document.getElementById(`size-${size}`);
+      btn?.addEventListener('click', function() {
+        document.querySelectorAll('.size-button').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+  }
+  
+  // Browser View Handler with Tabs Support
+  function setupBrowserView() {
+    const browserButton = document.getElementById('browser-button');
+    const browserView = document.getElementById('browser-view');
+    const chatContainer = document.getElementById('chat-container');
+    const browserCloseBtn = document.getElementById('browser-close-view');
+    const browserUrl = document.getElementById('browser-url');
+    const browserGo = document.getElementById('browser-go');
+    const browserBack = document.getElementById('browser-back');
+    const browserForward = document.getElementById('browser-forward');
+    const browserHome = document.getElementById('browser-home');
+    const browserRefresh = document.getElementById('browser-refresh');
+    const browserNewTabBtn = document.getElementById('browser-new-tab');
+    const browserNewIncognitoTabBtn = document.getElementById('browser-new-incognito-tab');
+    const browserNewWindowBtn = document.getElementById('browser-new-window');
+    const browserIncognitoBtn = document.getElementById('browser-incognito');
+    const browserTabsContainer = document.getElementById('browser-tabs-container');
+    const browserTabsContent = document.getElementById('browser-tabs-content');
+    
+    if (!browserView || !browserTabsContainer || !browserTabsContent) {
+      // Browser elements not found, skip setup
+      return;
+    }
+    
+    let isBrowserOpen = false;
+    let tabs = [];
+    let activeTabId = null;
+    let tabIdCounter = 0;
+    
+    function showBrowser() {
+      // Add class to body for split view
+      document.body.classList.add('browser-open');
+      if (browserView) {
+        browserView.classList.add('active');
+      }
+      isBrowserOpen = true;
+      if (browserButton) browserButton.textContent = '💬 Chat';
+      
+      // Create first tab if none exist
+      if (tabs.length === 0) {
+        createTab('https://www.google.com', false);
+      }
+    }
+    
+    function hideBrowser() {
+      // Remove class from body to hide browser
+      document.body.classList.remove('browser-open');
+      if (browserView) {
+        browserView.classList.remove('active');
+      }
+      isBrowserOpen = false;
+      if (browserButton) browserButton.textContent = '🌐 Browser';
+    }
+    
+    function createTab(url = 'https://www.google.com', incognito = false) {
+      const tabId = `tab-${++tabIdCounter}`;
+      const tab = {
+        id: tabId,
+        url: url,
+        title: 'New Tab',
+        incognito: incognito,
+        loading: false
+      };
+      
+      tabs.push(tab);
+      
+      // Create tab button
+      const tabButton = document.createElement('div');
+      tabButton.className = 'browser-tab' + (incognito ? ' browser-tab-incognito' : '');
+      tabButton.dataset.tabId = tabId;
+      tabButton.innerHTML = `
+        <span class="browser-tab-title">${incognito ? '🔒 ' : ''}New Tab</span>
+        <button class="browser-tab-close" title="Close tab">×</button>
+      `;
+      
+      // Insert before new tab button
+      if (browserNewTabBtn && browserNewTabBtn.parentNode) {
+        browserNewTabBtn.parentNode.insertBefore(tabButton, browserNewTabBtn);
+      }
+      
+      // Create tab content with webview
+      const tabContent = document.createElement('div');
+      tabContent.className = 'browser-tab-content';
+      tabContent.id = `tab-content-${tabId}`;
+      tabContent.dataset.tabId = tabId;
+      
+      const webview = document.createElement('webview');
+      webview.id = `webview-${tabId}`;
+      webview.src = url;
+      webview.style.cssText = 'flex: 1; width: 100%; height: 100%; background: white; border: none; min-height: 0;';
+      
+      // Set partition for incognito (use temporary partition for true incognito)
+      if (incognito) {
+        webview.partition = `incognito-${tabId}`; // Temporary partition, cleared on close
+      }
+      
+      tabContent.appendChild(webview);
+      browserTabsContent.appendChild(tabContent);
+      
+      // Tab close button
+      const closeBtn = tabButton.querySelector('.browser-tab-close');
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTab(tabId);
+      });
+      
+      // Tab click to switch
+      tabButton.addEventListener('click', () => {
+        switchTab(tabId);
+      });
+      
+      // Webview event handlers
+      webview.addEventListener('did-start-loading', () => {
+        tab.loading = true;
+        tabButton.querySelector('.browser-tab-title').textContent = (incognito ? '🔒 ' : '') + 'Loading...';
+        updateNavigationButtons(tabId);
+      });
+      
+      webview.addEventListener('did-stop-loading', () => {
+        tab.loading = false;
+        tab.url = webview.getURL();
+        updateTabTitle(tabId);
+        updateNavigationButtons(tabId);
+        
+        if (activeTabId === tabId && browserUrl) {
+          browserUrl.value = tab.url;
+        }
+      });
+      
+      webview.addEventListener('page-title-updated', (event) => {
+        tab.title = event.title || 'New Tab';
+        updateTabTitle(tabId);
+      });
+      
+      webview.addEventListener('did-fail-load', (event) => {
+        tab.loading = false;
+        if (event.errorCode !== -3) {
+          console.error('Browser load failed:', event);
+          if (window.logsPanel) {
+            window.logsPanel.addLog('error', `Browser navigation failed: ${event.errorDescription || 'Unknown error'}`, null, {
+              source: 'Browser',
+              errorCode: event.errorCode,
+              url: event.validatedURL
+            });
+          }
+        }
+      });
+      
+      webview.addEventListener('new-window', (event) => {
+        event.preventDefault();
+        // Open in new tab
+        createTab(event.url, incognito);
+      });
+      
+      // Switch to new tab
+      switchTab(tabId);
+      
+      return tabId;
+    }
+    
+    function closeTab(tabId) {
+      const tabIndex = tabs.findIndex(t => t.id === tabId);
+      if (tabIndex === -1) return;
+      
+      const tab = tabs[tabIndex];
+      
+      // Clean up incognito session if needed
+      if (tab.incognito && window.electronAPI) {
+        // Request main process to clear session
+        const webview = document.getElementById(`webview-${tabId}`);
+        if (webview) {
+          try {
+            // Clear webview session data
+            webview.clearHistory();
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+        }
+      }
+      
+      // Remove tab from array
+      tabs.splice(tabIndex, 1);
+      
+      // Remove tab button
+      const tabButton = document.querySelector(`.browser-tab[data-tab-id="${tabId}"]`);
+      if (tabButton) tabButton.remove();
+      
+      // Remove tab content
+      const tabContent = document.getElementById(`tab-content-${tabId}`);
+      if (tabContent) {
+        const webview = tabContent.querySelector('webview');
+        if (webview) {
+          webview.remove();
+        }
+        tabContent.remove();
+      }
+      
+      // Switch to another tab if closing active tab
+      if (activeTabId === tabId) {
+        if (tabs.length > 0) {
+          switchTab(tabs[tabs.length - 1].id);
+        } else {
+          activeTabId = null;
+          if (browserUrl) browserUrl.value = '';
+          updateNavigationButtons(null);
+        }
+      }
+      
+      // Close browser if no tabs left
+      if (tabs.length === 0) {
+        hideBrowser();
+      }
+    }
+    
+    function switchTab(tabId) {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return;
+      
+      activeTabId = tabId;
+      
+      // Update tab buttons
+      document.querySelectorAll('.browser-tab').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      const activeTabButton = document.querySelector(`.browser-tab[data-tab-id="${tabId}"]`);
+      if (activeTabButton) activeTabButton.classList.add('active');
+      
+      // Update tab content visibility
+      document.querySelectorAll('.browser-tab-content').forEach(content => {
+        content.classList.remove('active');
+      });
+      const activeTabContent = document.getElementById(`tab-content-${tabId}`);
+      if (activeTabContent) activeTabContent.classList.add('active');
+      
+      // Update URL bar
+      if (browserUrl) {
+        browserUrl.value = tab.url || 'https://www.google.com';
+      }
+      
+      updateNavigationButtons(tabId);
+    }
+    
+    function updateTabTitle(tabId) {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return;
+      
+      const tabButton = document.querySelector(`.browser-tab[data-tab-id="${tabId}"]`);
+      if (tabButton) {
+        const titleEl = tabButton.querySelector('.browser-tab-title');
+        if (titleEl) {
+          const displayTitle = tab.title.length > 20 ? tab.title.substring(0, 20) + '...' : tab.title;
+          titleEl.textContent = (tab.incognito ? '🔒 ' : '') + displayTitle;
+        }
+      }
+    }
+    
+    function navigate(url) {
+      if (!activeTabId) return;
+      
+      const tab = tabs.find(t => t.id === activeTabId);
+      if (!tab) return;
+      
+      let finalUrl = url.trim();
+      
+      // Add protocol if missing
+      if (!finalUrl.match(/^https?:\/\//i)) {
+        // Check if it looks like a domain
+        if (finalUrl.includes('.') && !finalUrl.includes(' ')) {
+          finalUrl = 'https://' + finalUrl;
+        } else {
+          // Treat as search query
+          finalUrl = 'https://www.google.com/search?q=' + encodeURIComponent(finalUrl);
+        }
+      }
+      
+      const webview = document.getElementById(`webview-${activeTabId}`);
+      if (webview) {
+        webview.src = finalUrl;
+        tab.url = finalUrl;
+        if (browserUrl) browserUrl.value = finalUrl;
+      }
+    }
+    
+    function updateNavigationButtons(tabId) {
+      if (!tabId) {
+        if (browserBack) browserBack.disabled = true;
+        if (browserForward) browserForward.disabled = true;
+        return;
+      }
+      
+      const webview = document.getElementById(`webview-${tabId}`);
+      if (!webview) return;
+      
+      if (browserBack) {
+        browserBack.disabled = !webview.canGoBack();
+      }
+      if (browserForward) {
+        browserForward.disabled = !webview.canGoForward();
+      }
+    }
+    
+    // Browser button toggle
+    browserButton?.addEventListener('click', () => {
+      if (isBrowserOpen) {
+        hideBrowser();
+      } else {
+        showBrowser();
+      }
+    });
+    
+    // Close browser button
+    browserCloseBtn?.addEventListener('click', () => {
+      hideBrowser();
+    });
+    
+    // New tab button
+    browserNewTabBtn?.addEventListener('click', () => {
+      createTab('https://www.google.com', false);
+    });
+    
+    // New incognito tab button
+    browserNewIncognitoTabBtn?.addEventListener('click', () => {
+      createTab('https://www.google.com', true);
+    });
+    
+    // New window button
+    browserNewWindowBtn?.addEventListener('click', async () => {
+      if (window.electronAPI && window.electronAPI.createBrowserWindow) {
+        try {
+          const result = await window.electronAPI.createBrowserWindow({
+            url: 'https://www.google.com',
+            incognito: false
+          });
+          if (!result.success && window.logsPanel) {
+            window.logsPanel.addLog('error', `Failed to create browser window: ${result.error}`, null, {
+              source: 'Browser'
+            });
+          }
+        } catch (error) {
+          console.error('Failed to create browser window:', error);
+        }
+      }
+    });
+    
+    // Incognito window button
+    browserIncognitoBtn?.addEventListener('click', async () => {
+      if (window.electronAPI && window.electronAPI.createBrowserWindow) {
+        try {
+          const result = await window.electronAPI.createBrowserWindow({
+            url: 'https://www.google.com',
+            incognito: true
+          });
+          if (!result.success && window.logsPanel) {
+            window.logsPanel.addLog('error', `Failed to create incognito window: ${result.error}`, null, {
+              source: 'Browser'
+            });
+          }
+        } catch (error) {
+          console.error('Failed to create incognito window:', error);
+        }
+      }
+    });
+    
+    // Navigate on Go button or Enter key
+    browserGo?.addEventListener('click', () => {
+      if (browserUrl) {
+        navigate(browserUrl.value);
+      }
+    });
+    
+    browserUrl?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        navigate(browserUrl.value);
+      }
+    });
+    
+    // Navigation buttons
+    browserBack?.addEventListener('click', () => {
+      if (!activeTabId) return;
+      const webview = document.getElementById(`webview-${activeTabId}`);
+      if (webview && webview.canGoBack()) {
+        webview.goBack();
+      }
+    });
+    
+    browserForward?.addEventListener('click', () => {
+      if (!activeTabId) return;
+      const webview = document.getElementById(`webview-${activeTabId}`);
+      if (webview && webview.canGoForward()) {
+        webview.goForward();
+      }
+    });
+    
+    browserHome?.addEventListener('click', () => {
+      navigate('https://www.google.com');
+    });
+    
+    browserRefresh?.addEventListener('click', () => {
+      if (!activeTabId) return;
+      const webview = document.getElementById(`webview-${activeTabId}`);
+      if (webview) {
+        webview.reload();
+      }
+    });
+  }
+  
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
+    document.addEventListener('DOMContentLoaded', () => {
+      setupBrowserView();
+      setupNavigation();
+      initialize();
+    });
   } else {
+    setupBrowserView();
+    setupNavigation();
     initialize();
   }
   

@@ -54,6 +54,25 @@ function logError(error) {
 }
 
 /**
+ * Log info message
+ * @param {string} message - Info message
+ */
+function logInfo(message) {
+  if (!initialized) return;
+  
+  // In a full implementation, this would write to encrypted audit log
+  // For now, just log to console in development
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[Security Info]', message);
+  }
+  
+  logSecurityEvent('info', {
+    message,
+    timestamp: new Date().toISOString()
+  });
+}
+
+/**
  * Log failed login attempt
  */
 function logFailedLogin() {
@@ -92,6 +111,7 @@ module.exports = {
   initialize,
   logSecurityEvent,
   logError,
+  logInfo,
   logFailedLogin,
   logSuccessfulAuth,
   logEncryptionError,

@@ -104,6 +104,7 @@ async function verifyPasswordAndGetKey(password) {
  * @param {Function} setSessionKey - Function to set session key
  */
 function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
+  const { app } = require('electron');
   
   // Verify password
   ipcMain.handle('verify-password', async (event, password) => {
@@ -727,6 +728,243 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         success: false,
         error: errorMessage
       };
+    }
+  });
+  
+  // Quit app
+  ipcMain.handle('quit-app', async () => {
+    app.quit();
+    return { success: true };
+  });
+  
+  // Get desktop sources for screen/audio capture
+  ipcMain.handle('get-desktop-sources', async (event, options = {}) => {
+    try {
+      const { desktopCapturer } = require('electron');
+      const sources = await desktopCapturer.getSources({
+        types: ['window', 'screen'],
+        fetchWindowIcons: false
+      });
+      return {
+        success: true,
+        sources: sources.map(source => ({
+          id: source.id,
+          name: source.name,
+          thumbnail: source.thumbnail.toDataURL()
+        }))
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+  
+  // Create new browser window
+  ipcMain.handle('create-browser-window', async (event, options = {}) => {
+    try {
+      const { BrowserWindow } = require('electron');
+      const url = options.url || 'https://www.google.com';
+      const incognito = options.incognito || false;
+      
+      // Store partition name for cleanup
+      const partitionName = incognito ? `persist:incognito-${Date.now()}` : 'persist:default';
+      
+      // Create a new browser window
+      const browserWindow = new BrowserWindow({
+        width: 1000,
+        height: 700,
+        minWidth: 600,
+        minHeight: 400,
+        backgroundColor: '#1a1a1a',
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: false,
+          preload: path.join(__dirname, '../preload/preload.js'),
+          webSecurity: true,
+          allowRunningInsecureContent: false,
+          webviewTag: true,
+          // Use partition for incognito mode
+          partition: partitionName
+        },
+        show: false,
+        frame: true,
+        titleBarStyle: 'default',
+        icon: path.join(__dirname, '../../assets/icon.png')
+      });
+      
+      // Create HTML content for browser window
+      const browserHTML = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; webview-src *; frame-src *;">
+  <title>${incognito ? 'Incognito' : 'Browser'} - Private AI Chat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .browser-toolbar {
+      background: #252525;
+      border-bottom: 1px solid #333;
+      padding: 8px 12px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .browser-nav-btn {
+      background: #333;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      min-width: 32px;
+    }
+    .browser-nav-btn:hover { background: #3a3a3a; }
+    .browser-nav-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .browser-url-bar {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .browser-url-bar:focus {
+      outline: none;
+      border-color: #4a9eff;
+    }
+    .browser-refresh-btn {
+      background: #333;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      min-width: 32px;
+    }
+    .browser-refresh-btn:hover { background: #3a3a3a; }
+    .incognito-indicator {
+      background: #ff4444;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    webview {
+      flex: 1;
+      width: 100%;
+      background: white;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="browser-toolbar">
+    ${incognito ? '<div class="incognito-indicator">🔒 Incognito</div>' : ''}
+    <button id="browser-back" class="browser-nav-btn" title="Back">←</button>
+    <button id="browser-forward" class="browser-nav-btn" title="Forward">→</button>
+    <button id="browser-home" class="browser-nav-btn" title="Home">🏠</button>
+    <input type="text" id="browser-url" class="browser-url-bar" placeholder="Enter URL or search..." value="${url}">
+    <button id="browser-go" class="browser-nav-btn" title="Go">Go</button>
+    <button id="browser-refresh" class="browser-refresh-btn" title="Refresh">↻</button>
+  </div>
+  <webview id="browser-webview" src="${url}" style="flex: 1; width: 100%;"></webview>
+  <script>
+    const webview = document.getElementById('browser-webview');
+    const urlBar = document.getElementById('browser-url');
+    const backBtn = document.getElementById('browser-back');
+    const forwardBtn = document.getElementById('browser-forward');
+    const homeBtn = document.getElementById('browser-home');
+    const goBtn = document.getElementById('browser-go');
+    const refreshBtn = document.getElementById('browser-refresh');
+    
+    function navigate(url) {
+      let finalUrl = url.trim();
+      if (!finalUrl.match(/^https?:\\/\\//i)) {
+        if (finalUrl.includes('.') && !finalUrl.includes(' ')) {
+          finalUrl = 'https://' + finalUrl;
+        } else {
+          finalUrl = 'https://www.google.com/search?q=' + encodeURIComponent(finalUrl);
+        }
+      }
+      webview.src = finalUrl;
+      urlBar.value = finalUrl;
+    }
+    
+    function updateNavButtons() {
+      backBtn.disabled = !webview.canGoBack();
+      forwardBtn.disabled = !webview.canGoForward();
+    }
+    
+    goBtn.addEventListener('click', () => navigate(urlBar.value));
+    urlBar.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') navigate(urlBar.value);
+    });
+    backBtn.addEventListener('click', () => webview.canGoBack() && webview.goBack());
+    forwardBtn.addEventListener('click', () => webview.canGoForward() && webview.goForward());
+    homeBtn.addEventListener('click', () => navigate('https://www.google.com'));
+    refreshBtn.addEventListener('click', () => webview.reload());
+    
+    webview.addEventListener('did-stop-loading', () => {
+      urlBar.value = webview.getURL();
+      updateNavButtons();
+    });
+    
+    webview.addEventListener('did-start-loading', updateNavButtons);
+    
+    webview.addEventListener('new-window', (e) => {
+      e.preventDefault();
+      navigate(e.url);
+    });
+  </script>
+</body>
+</html>`;
+      
+      // Load the HTML content
+      browserWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(browserHTML)}`);
+      
+      browserWindow.once('ready-to-show', () => {
+        browserWindow.show();
+      });
+      
+      browserWindow.on('closed', () => {
+        // Clean up incognito session if needed
+        if (incognito) {
+          const { session } = require('electron');
+          try {
+            const incognitoSession = session.fromPartition(partitionName);
+            incognitoSession.clearStorageData({
+              storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+            });
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+        }
+      });
+      
+      return { success: true, windowId: browserWindow.id };
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
     }
   });
 }
