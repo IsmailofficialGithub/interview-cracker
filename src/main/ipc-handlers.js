@@ -475,20 +475,116 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
     }
   });
   
+  // Send message to AI with real-time streaming via IPC events
+  ipcMain.handle('send-ai-message-stream', async (event, providerConfig, messages, channel) => {
+    try {
+      const key = getSessionKey();
+      if (!key) {
+        return { success: false, error: 'Not authenticated' };
+      }
+      
+      // Load provider modules
+      const OpenAIProvider = require('../providers/openai');
+      const OllamaProvider = require('../providers/ollama');
+      const OpenAICompatibleProvider = require('../providers/openai-compatible');
+      const GroqProvider = require('../providers/groq');
+      
+      let provider;
+      switch (providerConfig.type) {
+        case 'openai':
+          provider = new OpenAIProvider(providerConfig);
+          break;
+        case 'ollama':
+          provider = new OllamaProvider(providerConfig);
+          break;
+        case 'openai-compatible':
+          provider = new OpenAICompatibleProvider(providerConfig);
+          break;
+        case 'groq':
+          provider = new GroqProvider(providerConfig);
+          break;
+        default:
+          return { success: false, error: `Unknown provider type: ${providerConfig.type}` };
+      }
+      
+      // Stream message and send chunks via IPC events
+      await provider.streamMessage(messages, {}, (chunk) => {
+        // Send chunk to renderer via IPC event
+        event.sender.send(channel, chunk);
+      });
+      
+      // Send done signal
+      event.sender.send(channel, '[DONE]');
+      
+      return { success: true };
+    } catch (error) {
+      // Send error via channel
+      if (channel) {
+        event.sender.send(channel, `[ERROR]${error.message}`);
+      }
+      return { success: false, error: error.message };
+    }
+  });
+  
   // Lock session (clear session key)
   ipcMain.handle('lock-session', async () => {
     setSessionKey(null);
     return { success: true };
   });
   
-  // Toggle always on top
+  // Toggle always on top (but always enforce it stays on top)
   ipcMain.handle('toggle-always-on-top', async () => {
     try {
       // Use the main window passed in registerHandlers
       if (mainWindow) {
-        const isOnTop = mainWindow.isAlwaysOnTop();
-        mainWindow.setAlwaysOnTop(!isOnTop);
-        return { success: true, alwaysOnTop: !isOnTop };
+        // Always ensure window is on top - don't allow disabling
+        // This ensures the app always stays on top as requested
+        if (!mainWindow.isAlwaysOnTop()) {
+          mainWindow.setAlwaysOnTop(true);
+        }
+        
+        // Bring window to front
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        if (!mainWindow.isVisible()) {
+          mainWindow.show();
+        }
+        mainWindow.focus();
+        // Re-apply always-on-top to ensure it's active
+        mainWindow.setAlwaysOnTop(true);
+        
+        return { success: true, alwaysOnTop: true };
+      }
+      return { success: false, error: 'Main window not available' };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Bring window to front
+  ipcMain.handle('bring-window-to-front', async () => {
+    try {
+      if (mainWindow) {
+        // Ensure always-on-top is enabled first
+        if (!mainWindow.isAlwaysOnTop()) {
+          mainWindow.setAlwaysOnTop(true);
+        }
+        
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        
+        // Show and focus the window
+        if (!mainWindow.isVisible()) {
+          mainWindow.show();
+        }
+        mainWindow.focus();
+        
+        // Re-apply always-on-top to ensure it stays active
+        mainWindow.setAlwaysOnTop(true);
+        
+        return { success: true };
       }
       return { success: false, error: 'Main window not available' };
     } catch (error) {
@@ -741,8 +837,9 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
   ipcMain.handle('get-desktop-sources', async (event, options = {}) => {
     try {
       const { desktopCapturer } = require('electron');
+      const sourceTypes = options.types || ['window', 'screen'];
       const sources = await desktopCapturer.getSources({
-        types: ['window', 'screen'],
+        types: sourceTypes,
         fetchWindowIcons: false
       });
       return {

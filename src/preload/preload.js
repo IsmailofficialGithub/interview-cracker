@@ -46,15 +46,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendAIMessage: (providerConfig, messages) => ipcRenderer.invoke('send-ai-message', providerConfig, messages),
   
   // AI message with streaming (returns chunks)
-  sendAIMessageStream: (providerConfig, messages, onChunk) => {
-    // For streaming, we'll use a callback approach
-    // The handler returns all chunks at once for now
-    // In production, use a proper streaming IPC channel
-    return ipcRenderer.invoke('send-ai-message', providerConfig, messages).then(result => {
-      if (result.success && result.chunks && onChunk) {
-        result.chunks.forEach(chunk => onChunk(chunk));
-      }
-      return result;
+  sendAIMessageStream: async (providerConfig, messages, onChunk) => {
+    // Use proper streaming via IPC
+    return new Promise((resolve, reject) => {
+      const channel = `ai-stream-${Date.now()}`;
+      let fullContent = '';
+      
+      // Listen for chunks
+      const chunkHandler = (event, chunk) => {
+        if (chunk === '[DONE]') {
+          ipcRenderer.removeListener(channel, chunkHandler);
+          resolve({ success: true, content: fullContent });
+        } else {
+          fullContent += chunk;
+          if (onChunk) {
+            onChunk(chunk);
+          }
+        }
+      };
+      
+      ipcRenderer.on(channel, chunkHandler);
+      
+      // Start streaming
+      ipcRenderer.invoke('send-ai-message-stream', providerConfig, messages, channel).then(result => {
+        if (!result.success) {
+          ipcRenderer.removeListener(channel, chunkHandler);
+          reject(new Error(result.error || 'Streaming failed'));
+        }
+      }).catch(error => {
+        ipcRenderer.removeListener(channel, chunkHandler);
+        reject(error);
+      });
     });
   },
   
@@ -79,6 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Always on top controls
   toggleAlwaysOnTop: () => ipcRenderer.invoke('toggle-always-on-top'),
   getAlwaysOnTop: () => ipcRenderer.invoke('get-always-on-top'),
+  bringWindowToFront: () => ipcRenderer.invoke('bring-window-to-front'),
   
   // Voice transcription (OpenAI Whisper or Groq Whisper)
   transcribeAudio: (audioData, apiKey, providerType, model) => ipcRenderer.invoke('transcribe-audio', audioData, apiKey, providerType, model),

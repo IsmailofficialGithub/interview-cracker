@@ -71,6 +71,9 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     if (mainWindow) {
       mainWindow.show();
+      // Ensure always-on-top is enabled
+      mainWindow.setAlwaysOnTop(true);
+      mainWindow.focus();
     }
   });
 
@@ -85,13 +88,33 @@ function createWindow() {
   mainWindow.on('blur', () => {
     if (mainWindow) {
       mainWindow.webContents.send('window-blurred');
+      
+      // Always ensure window stays on top
+      // Re-apply always-on-top to ensure it stays active
+      if (!mainWindow.isAlwaysOnTop()) {
+        mainWindow.setAlwaysOnTop(true);
+      }
     }
   });
+  
+  // Periodically ensure always-on-top is enabled
+  setInterval(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isAlwaysOnTop()) {
+        mainWindow.setAlwaysOnTop(true);
+      }
+    }
+  }, 2000); // Check every 2 seconds
 
   // Handle window focus
   mainWindow.on('focus', () => {
     if (mainWindow) {
       mainWindow.webContents.send('window-focused');
+      
+      // Ensure always-on-top is enabled when window gains focus
+      if (!mainWindow.isAlwaysOnTop()) {
+        mainWindow.setAlwaysOnTop(true);
+      }
     }
   });
 

@@ -17,6 +17,7 @@ let authModal = null;
 let settingsPanel = null;
 let currentProviderId = null;
 let config = null;
+let voiceAssistant = null;
 
 /**
  * Initialize application
@@ -68,6 +69,63 @@ async function loadApplication() {
   
   settingsPanel = new SettingsPanel();
   await settingsPanel.initialize();
+  
+  // Initialize Voice Assistant
+  try {
+    // VoiceAssistant should be available globally from the script tag
+    if (typeof VoiceAssistant !== 'undefined' || typeof window.VoiceAssistant !== 'undefined') {
+      const VoiceAssistantClass = VoiceAssistant || window.VoiceAssistant;
+      voiceAssistant = new VoiceAssistantClass();
+      await voiceAssistant.initialize();
+      
+      // Setup callbacks
+      voiceAssistant.onTranscription = (text) => {
+        // Show transcription in chat
+        if (chatUI && chatUI.messages) {
+          chatUI.addMessage('user', `[Voice] ${text}`);
+        }
+      };
+      
+      voiceAssistant.onResponse = (response, isComplete) => {
+        // Show response in chat
+        if (chatUI && chatUI.messages) {
+          if (isComplete) {
+            // Check if there's already an assistant message being streamed
+            const lastMsg = chatUI.messages[chatUI.messages.length - 1];
+            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === 'Thinking...') {
+              // Replace thinking message
+              chatUI.messages[chatUI.messages.length - 1].content = response;
+              chatUI.rerenderMessages();
+            } else {
+              chatUI.addMessage('assistant', response);
+            }
+          } else {
+            // Update streaming response
+            const lastMsg = chatUI.messages[chatUI.messages.length - 1];
+            if (lastMsg && lastMsg.role === 'assistant') {
+              chatUI.updateLastAssistantMessage(response);
+            } else {
+              // Add new message if none exists
+              chatUI.addMessage('assistant', response);
+            }
+          }
+        }
+      };
+      
+      voiceAssistant.onError = (error) => {
+        console.error('Voice Assistant Error:', error);
+        if (chatUI && chatUI.messages) {
+          chatUI.addMessage('assistant', `[Error] ${error}`);
+        }
+      };
+      
+      console.log('Voice Assistant initialized successfully');
+    } else {
+      console.warn('VoiceAssistant class not found. Voice assistant features will not be available.');
+    }
+  } catch (error) {
+    console.error('Failed to initialize Voice Assistant:', error);
+  }
   
   // Setup settings button
   const settingsBtn = document.getElementById('settings-button');
