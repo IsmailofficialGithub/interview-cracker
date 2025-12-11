@@ -1081,8 +1081,20 @@ class VoiceAssistant {
 
 // Export for use in renderer
 // Make it available globally for script tag loading
+// Always attach to window if it exists (should always exist in browser context)
 if (typeof window !== 'undefined') {
   window.VoiceAssistant = VoiceAssistant;
+  console.log('✅ VoiceAssistant class attached to window.VoiceAssistant');
+} else {
+  // Fallback: try to attach anyway (for edge cases)
+  try {
+    globalThis.VoiceAssistant = VoiceAssistant;
+    globalThis.window = globalThis.window || globalThis;
+    globalThis.window.VoiceAssistant = VoiceAssistant;
+    console.log('✅ VoiceAssistant attached via globalThis fallback');
+  } catch (e) {
+    console.error('❌ Failed to attach VoiceAssistant:', e);
+  }
 }
 
 // Also support CommonJS if needed

@@ -37,6 +37,38 @@
       opacity: 0.3;
       pointer-events: none;
     }
+    /* Loading state for voice mode toggle */
+.voice-mode-toggle.loading {
+  opacity: 0.6;
+  pointer-events: none;
+  position: relative;
+}
+
+.voice-mode-toggle.loading::after {
+  content: 'Loading...';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  z-index: 1000;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.toggle-option.loading {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.toggle-option.loading::before {
+  content: '⏳';
+  margin-right: 4px;
+}
     
     /* Header */
     .header {
@@ -1708,10 +1740,10 @@
     </div>
     <div class="input-area">
       <div id="voice-mode-toggle" class="voice-mode-toggle" title="Toggle between MINE MODE (Microphone) and YOURS MODE (System Audio)">
-        <span class="toggle-option active" data-mode="mine">
+        <span class="toggle-option active" data-mode="mine" onclick="window.handleVoiceModeToggle && window.handleVoiceModeToggle('mine'); return false;">
           <i data-feather="mic" class="icon"></i> MINE
         </span>
-        <span class="toggle-option" data-mode="yours">
+        <span class="toggle-option" data-mode="yours" onclick="window.handleVoiceModeToggle && window.handleVoiceModeToggle('yours'); return false;">
           <i data-feather="volume-2" class="icon"></i> YOURS
         </span>
       </div>
@@ -1730,6 +1762,19 @@
   <!-- End Main Content Area -->
   
   <script src="./renderer/ui/voice-assistant.js"></script>
+  <script>
+    // Immediate diagnostic check
+    console.log('=== VOICE ASSISTANT SCRIPT LOAD CHECK ===');
+    console.log('window.VoiceAssistant:', typeof window.VoiceAssistant);
+    console.log('VoiceAssistant (global):', typeof VoiceAssistant);
+    
+    if (typeof window.VoiceAssistant === 'undefined') {
+      console.error('❌ CRITICAL: VoiceAssistant NOT attached to window!');
+      console.error('The voice-assistant.js script may have failed to execute.');
+    } else {
+      console.log('✅ VoiceAssistant successfully attached to window');
+    }
+  </script>
   <!-- Define modal functions immediately so they're available when renderer-bundle.js loads -->
   <script>
     // Define modal functions immediately - BEFORE any other scripts
@@ -1778,6 +1823,149 @@
       }
     };
     
+   // Voice mode toggle handler - defined early for inline onclick handlers
+window.handleVoiceModeToggle = function(mode) {
+  console.log('=== INLINE VOICE MODE TOGGLE HANDLER ===', mode);
+  
+  // Get the toggle element
+  const toggleElement = document.getElementById('voice-mode-toggle');
+  const clickedOption = toggleElement?.querySelector(`[data-mode="${mode}"]`);
+  
+  // Show loading state immediately
+  if (toggleElement) {
+    toggleElement.classList.add('loading');
+    toggleElement.title = 'Switching mode...';
+  }
+  if (clickedOption) {
+    clickedOption.classList.add('loading');
+  }
+  
+  // Function to remove loading state
+  const removeLoading = () => {
+    if (toggleElement) {
+      toggleElement.classList.remove('loading');
+    }
+    if (clickedOption) {
+      clickedOption.classList.remove('loading');
+    }
+  };
+  
+  console.log('window.voiceAssistant:', !!window.voiceAssistant);
+  console.log('window.VoiceAssistant class:', !!window.VoiceAssistant);
+  console.log('window.voiceAssistant type:', typeof window.voiceAssistant);
+  
+  // First, check if instance is available and valid (not null)
+  if (window.voiceAssistant && window.voiceAssistant !== null && typeof window.voiceAssistant.setMode === 'function') {
+    console.log('✅ VoiceAssistant available! Calling setMode with:', mode);
+    
+    // Update loading text
+    if (toggleElement) {
+      toggleElement.title = `Switching to ${mode.toUpperCase()} mode...`;
+    }
+    
+    window.voiceAssistant.setMode(mode).then(() => {
+      console.log('✅ Mode switched successfully to:', mode);
+      removeLoading();
+      // Update title after success
+      if (toggleElement) {
+        const modeName = mode === 'mine' ? 'MINE' : 'YOURS';
+        toggleElement.title = `Currently: ${modeName} MODE. Click to switch.`;
+      }
+    }).catch(err => {
+      console.error('❌ Error switching voice mode:', err);
+      removeLoading();
+      alert('Error switching mode: ' + err.message);
+    });
+    return false;
+  }
+  
+  // If instance is null, it means initialization failed
+  if (window.voiceAssistant === null) {
+    console.error('❌ VoiceAssistant initialization failed. Please check console for errors.');
+    removeLoading();
+    alert('Voice Assistant failed to initialize. Please check the console for details and refresh the page.');
+    return false;
+  }
+  
+  // If instance not available, check if class is available and try to initialize
+  if (window.VoiceAssistant && typeof window.VoiceAssistant === 'function') {
+    console.log('VoiceAssistant class found, but instance not ready. Will retry...');
+    if (toggleElement) {
+      toggleElement.title = 'Waiting for Voice Assistant to initialize...';
+    }
+  } else {
+    console.warn('VoiceAssistant class not found. Script may not be loaded yet.');
+    console.log('Checking if renderer.js is loaded...');
+    if (toggleElement) {
+      toggleElement.title = 'Voice Assistant not ready. Waiting...';
+    }
+    // Check if we can detect renderer.js loading
+    if (typeof window.loadApplication === 'undefined') {
+      console.warn('renderer.js may not be loaded yet. Waiting for initialization...');
+    }
+  }
+  
+  // Retry with longer timeout and more attempts
+  let retryCount = 0;
+  const maxRetries = 15; // Increased to 15 retries = 3 seconds (initialization can take time)
+  const retryInterval = setInterval(() => {
+    retryCount++;
+    console.log(`Retry attempt ${retryCount}/${maxRetries}...`);
+    
+    // Update loading text during retries
+    if (toggleElement) {
+      toggleElement.title = `Initializing... (${retryCount}/${maxRetries})`;
+    }
+    
+    console.log('Current state:', {
+      voiceAssistant: !!window.voiceAssistant,
+      voiceAssistantType: typeof window.voiceAssistant,
+      hasSetMode: window.voiceAssistant && typeof window.voiceAssistant.setMode === 'function'
+    });
+    
+    if (window.voiceAssistant && window.voiceAssistant !== null && typeof window.voiceAssistant.setMode === 'function') {
+      clearInterval(retryInterval);
+      console.log('✅ VoiceAssistant now available! Calling setMode...');
+      
+      if (toggleElement) {
+        toggleElement.title = `Switching to ${mode.toUpperCase()} mode...`;
+      }
+      
+      window.voiceAssistant.setMode(mode).then(() => {
+        console.log('✅ Mode switched successfully (retry) to:', mode);
+        removeLoading();
+        // Update title after success
+        if (toggleElement) {
+          const modeName = mode === 'mine' ? 'MINE' : 'YOURS';
+          toggleElement.title = `Currently: ${modeName} MODE. Click to switch.`;
+        }
+      }).catch(err => {
+        console.error('❌ Error switching voice mode (retry):', err);
+        removeLoading();
+        alert('Error switching mode: ' + err.message);
+      });
+    } else if (window.voiceAssistant === null) {
+      clearInterval(retryInterval);
+      console.error('❌ VoiceAssistant initialization failed (null instance)');
+      removeLoading();
+      alert('Voice Assistant failed to initialize. Please refresh the page.');
+    } else if (retryCount >= maxRetries) {
+      clearInterval(retryInterval);
+      console.error('❌ VoiceAssistant not available after', maxRetries, 'retries');
+      removeLoading();
+      console.log('Available globals:', {
+        voiceAssistant: !!window.voiceAssistant,
+        voiceAssistantType: typeof window.voiceAssistant,
+        VoiceAssistant: !!window.VoiceAssistant,
+        VoiceAssistantType: typeof window.VoiceAssistant,
+        rendererLoaded: typeof window.loadApplication !== 'undefined'
+      });
+      alert('Voice Assistant is not ready yet. Please wait a moment and try again, or refresh the page.');
+    }
+  }, 200);
+  
+  return false; // Prevent default and stop propagation
+};
     // Setup button handlers immediately using event delegation
     // This ensures buttons work even if renderer.js hasn't loaded yet
     document.addEventListener('DOMContentLoaded', function() {
@@ -1928,8 +2116,23 @@
     
     console.log('Modal functions defined on window - ready for renderer-bundle.js');
   </script>
-  <script src="./renderer/renderer.js"></script>
-  <script src="./renderer/renderer-bundle.js"></script>
+<script type="module" src="./renderer/renderer.js"></script>
+<script>
+  // Check if renderer.js module loaded
+  setTimeout(() => {
+    console.log('=== RENDERER.JS MODULE CHECK ===');
+    console.log('window.loadApplication:', typeof window.loadApplication);
+    console.log('window.rendererInitialize:', typeof window.rendererInitialize);
+    console.log('window.voiceAssistant:', typeof window.voiceAssistant);
+    
+    if (typeof window.loadApplication === 'undefined') {
+      console.error('❌ renderer.js module did NOT execute!');
+      console.error('Check for module loading errors above.');
+    } else {
+      console.log('✅ renderer.js module executed successfully');
+    }
+  }, 2000);
+</script>
   <script>
     // Initialize Feather icons after page load
     document.addEventListener('DOMContentLoaded', function() {

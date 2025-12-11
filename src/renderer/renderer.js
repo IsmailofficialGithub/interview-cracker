@@ -93,25 +93,32 @@ if (typeof window !== 'undefined') {
 
 /**
  * Initialize application
+ * Note: renderer-bundle.js handles main app initialization
+ * This function only initializes voice assistant after renderer-bundle.js is ready
  */
 async function initialize() {
-  // Check authentication status
-  const sessionStatus = await window.electronAPI.getSessionStatus();
+  // Don't initialize here - let renderer-bundle.js handle it
+  // We'll initialize voice assistant when loadApplication is called
+  console.log('renderer.js: Skipping main initialization (handled by renderer-bundle.js)');
   
-  if (!sessionStatus.authenticated) {
-    // Check if password is already set up
-    await showAuthModal();
-  } else {
-    // Load application
-    await loadApplication();
-  }
+  // Wait for renderer-bundle.js to initialize, then set up voice assistant
+  // This will be called by renderer-bundle.js after it initializes
 }
 
 /**
  * Show authentication modal
  */
 async function showAuthModal() {
-  authModal = new AuthModal();
+  // Try to use AuthModal from available sources
+  if (typeof AuthModal !== 'undefined') {
+    authModal = new AuthModal();
+  } else if (typeof modules !== 'undefined' && modules.AuthModal) {
+    authModal = new modules.AuthModal();
+  } else {
+    // Try to load from separate file
+    console.error('AuthModal class not found');
+    throw new Error('AuthModal not available');
+  }
   
   // Check if password setup is needed
   const status = await window.electronAPI.getSessionStatus();
@@ -129,20 +136,31 @@ async function showAuthModal() {
  * Load application after authentication
  */
 async function loadApplication() {
-  // Load configuration
-  await loadConfig();
+  // Wait for renderer-bundle.js to initialize first (it loads after this module)
+  // Check if renderer-bundle.js has already initialized
+  let retries = 0;
+  while (!window.chatUI && retries < 20) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    retries++;
+  }
   
-  // Initialize providers
-  await initializeProviders();
+  if (!window.chatUI) {
+    console.warn('renderer-bundle.js has not initialized yet. Voice assistant may not work properly.');
+    // Continue anyway - voice assistant will retry
+  }
   
-  // Initialize UI components
-  chatUI = new ChatUI();
-  chatUI.initialize();
+  // Use ChatUI from renderer-bundle.js (it should already be initialized)
+  chatUI = window.chatUI;
   
-  settingsPanel = new SettingsPanel();
-  await settingsPanel.initialize();
+  if (!chatUI) {
+    console.error('ChatUI not available from renderer-bundle.js');
+    // Don't throw error, just log - let renderer-bundle.js handle UI
+    // Still try to initialize voice assistant if possible
+  } else {
+    console.log('✅ Using ChatUI from renderer-bundle.js');
+  }
   
-  // Initialize Voice Assistant
+  // Initialize Voice Assistant (this is the main purpose of renderer.js)
   try {
     // VoiceAssistant should be available globally from the script tag
     if (typeof VoiceAssistant !== 'undefined' || typeof window.VoiceAssistant !== 'undefined') {
@@ -153,6 +171,25 @@ async function loadApplication() {
       
       // Make globally available for old system to check
       window.voiceAssistant = voiceAssistant;
+      console.log('✅ VoiceAssistant instance set to window.voiceAssistant');
+      
+      // Setup/update global toggle handler for inline onclick handlers
+      // This ensures the handler uses the initialized instance
+      window.handleVoiceModeToggle = async (mode) => {
+        console.log('=== RENDERER.JS TOGGLE HANDLER FIRED ===', mode);
+        if (voiceAssistant && typeof voiceAssistant.setMode === 'function') {
+          try {
+            console.log('Calling voiceAssistant.setMode with:', mode);
+            await voiceAssistant.setMode(mode);
+            console.log('Mode switched successfully to:', mode);
+          } catch (error) {
+            console.error('Error switching voice mode:', error);
+          }
+        } else {
+          console.warn('VoiceAssistant not available or setMode not found in renderer.js handler');
+        }
+      };
+      console.log('✅ handleVoiceModeToggle handler updated in renderer.js');
       
       // Setup callbacks
         voiceAssistant.onTranscription = (text) => {
@@ -203,16 +240,8 @@ async function loadApplication() {
     console.error('Failed to initialize Voice Assistant:', error);
   }
   
-  // Setup settings button
-  const settingsBtn = document.getElementById('settings-button');
-  if (settingsBtn) {
-    settingsBtn.addEventListener('click', () => {
-      settingsPanel.show();
-    });
-  }
-  
-  // Setup provider selector
-  setupProviderSelector();
+  // Settings button and provider selector are handled by renderer-bundle.js
+  // We don't need to set them up here
   
   // FORCE HIDE modal on startup - multiple ways to ensure it's hidden
   const modal = document.getElementById('new-chat-modal');
@@ -407,9 +436,16 @@ function setupNewChatModal() {
 }
 
 /**
- * Load configuration
+ * Load configuration (if needed for voice assistant)
+ * Note: renderer-bundle.js also loads config, so we can use window.config if available
  */
 async function loadConfig() {
+  // Check if config is already loaded by renderer-bundle.js
+  if (window.config) {
+    config = window.config;
+    return;
+  }
+  
   try {
     const result = await window.electronAPI.getConfig();
     if (result.success) {
@@ -424,73 +460,20 @@ async function loadConfig() {
 }
 
 /**
- * Initialize AI providers from config
- */
-async function initializeProviders() {
-  if (!config || !config.accounts) return;
-  
-  for (const account of config.accounts) {
-    try {
-      aiProviderManager.registerProvider(account.name, {
-        type: account.type,
-        apiKey: account.apiKey || '',
-        model: account.model,
-        baseURL: account.baseURL,
-        name: account.name
-      });
-      
-      // Set first provider as current
-      if (!currentProviderId) {
-        currentProviderId = account.name;
-      }
-    } catch (error) {
-      console.error(`Failed to initialize provider ${account.name}:`, error);
-    }
-  }
-}
-
-/**
- * Setup provider selector dropdown
- */
-function setupProviderSelector() {
-  const selector = document.getElementById('provider-selector');
-  if (!selector) return;
-  
-  // Populate selector
-  const providerIds = aiProviderManager.getProviderIds();
-  selector.innerHTML = '';
-  
-  providerIds.forEach(id => {
-    const option = document.createElement('option');
-    option.value = id;
-    option.textContent = id;
-    selector.appendChild(option);
-  });
-  
-  if (currentProviderId) {
-    selector.value = currentProviderId;
-  }
-  
-  // Handle change
-  selector.addEventListener('change', (e) => {
-    currentProviderId = e.target.value;
-  });
-}
-
-/**
  * Send message to AI
+ * Note: This function is mainly for voice assistant integration
+ * The main chat UI in renderer-bundle.js handles regular message sending
  */
 async function sendAIMessage(messageContent) {
-  if (!currentProviderId) {
-    throw new Error('No AI provider selected. Please configure an AI account in settings.');
-  }
+  // Use chatUI from window (set by renderer-bundle.js)
+  const activeChatUI = window.chatUI || chatUI;
   
-  if (!chatUI) {
+  if (!activeChatUI) {
     throw new Error('Chat UI not initialized');
   }
   
   // Get current chat messages (excluding the "Thinking..." placeholder)
-  const existingMessages = chatUI.messages.filter(msg => msg.content !== 'Thinking...');
+  const existingMessages = activeChatUI.messages.filter(msg => msg.content !== 'Thinking...');
   const messages = existingMessages.map(msg => ({
     role: msg.role,
     content: msg.content
@@ -503,11 +486,9 @@ async function sendAIMessage(messageContent) {
   });
   
   // Get chat context if available
-  const chatContext = (chatUI && typeof chatUI.getContext === 'function') 
-    ? chatUI.getContext() 
-    : (window.chatUI && typeof window.chatUI.getContext === 'function')
-      ? window.chatUI.getContext()
-      : null;
+  const chatContext = (activeChatUI && typeof activeChatUI.getContext === 'function') 
+    ? activeChatUI.getContext() 
+    : null;
   
   // Build messages with system prompt and context
   let systemPrompt = 'You are a helpful AI assistant. Provide clear, accurate responses.';
@@ -529,41 +510,59 @@ async function sendAIMessage(messageContent) {
     ...messages
   ];
   
+  // Use window.aiProviderManager if available (from renderer-bundle.js)
+  const providerManager = window.aiProviderManager || aiProviderManager;
+  const activeProviderId = window.currentProviderId || currentProviderId;
+  
+  if (!providerManager || !activeProviderId) {
+    throw new Error('AI provider not available. Please configure in settings.');
+  }
+  
   // Stream response
   let fullResponse = '';
   
   try {
-    await aiProviderManager.streamMessage(
-      currentProviderId,
+    await providerManager.streamMessage(
+      activeProviderId,
       messagesWithSystem,
       {},
       (chunk) => {
         fullResponse += chunk;
-        chatUI.updateLastAssistantMessage(fullResponse);
+        activeChatUI.updateLastAssistantMessage(fullResponse);
       }
     );
     
     // Update final message
-    chatUI.updateLastAssistantMessage(fullResponse);
+    activeChatUI.updateLastAssistantMessage(fullResponse);
   } catch (error) {
     // Update with error message
-    chatUI.updateLastAssistantMessage(`Error: ${error.message}`);
+    activeChatUI.updateLastAssistantMessage(`Error: ${error.message}`);
     console.error('AI request failed:', error);
   }
 }
 
-// Export for use in ChatUI override
-globalSendAIMessage = sendAIMessage;
-
 // Store reference to sendAIMessage for ChatUI
 let globalSendAIMessage = null;
 
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initialize);
-} else {
-  initialize();
+// Export for use in ChatUI override
+globalSendAIMessage = sendAIMessage;
+
+// Expose functions to window for debugging
+if (typeof window !== 'undefined') {
+  window.loadApplication = loadApplication;
+  window.rendererInitialize = initialize;
+  console.log('✅ renderer.js functions exposed to window');
 }
+
+// Don't auto-initialize - let renderer-bundle.js handle initialization
+// Voice assistant will be initialized when loadApplication is called
+// This prevents conflicts with renderer-bundle.js initialization
+
+// Expose a function that renderer-bundle.js can call after it initializes
+window.initializeVoiceAssistant = async function() {
+  console.log('Initializing voice assistant from renderer-bundle.js callback');
+  await loadApplication();
+};
 
 // Test function for debugging - type window.testShowModal() in console
 window.testShowModal = function() {

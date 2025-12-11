@@ -85,9 +85,26 @@
     }
     
     setupEventListeners() {
-      this.sendButton.addEventListener('click', () => {
+      console.log('ChatUI: Setting up event listeners...');
+      console.log('sendButton:', !!this.sendButton);
+      
+      if (!this.sendButton) {
+        console.error('ChatUI: sendButton is null!');
+        return;
+      }
+      
+      // Remove any existing listeners by cloning
+      const newSendBtn = this.sendButton.cloneNode(true);
+      this.sendButton.parentNode.replaceChild(newSendBtn, this.sendButton);
+      this.sendButton = newSendBtn;
+      
+      this.sendButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Send button clicked');
         this.sendMessage();
       });
+      console.log('✅ Send button listener attached');
       
       this.inputArea.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
@@ -2297,7 +2314,10 @@
         submitBtn.textContent = this.setupMode ? 'Setup Password' : 'Unlock';
       }
       
-      document.getElementById('password-input').value = '';
+      const passwordInput = document.getElementById('password-input');
+      if (passwordInput) {
+        passwordInput.value = '';
+      }
     }
     
     hide() {
@@ -3350,13 +3370,17 @@
   };
   
   async function loadApplication() {
+    console.log('=== renderer-bundle.js: loadApplication() called ===');
+    
     await loadConfig();
     
+    console.log('Creating ChatUI instance...');
     chatUI = new modules.ChatUI();
     chatUI.initialize();
     
     // Expose chatUI globally so it can be accessed by inline handlers
     window.chatUI = chatUI;
+    console.log('✅ ChatUI initialized and exposed to window.chatUI');
     
     settingsPanel = new modules.SettingsPanel();
     
@@ -3370,18 +3394,48 @@
       logsPanel.addLog(logData.level || 'error', logData.message, logData.stack, logData.details);
     });
     
+    console.log('Setting up button event listeners...');
+    
     const settingsBtn = document.getElementById('settings-button');
+    console.log('settings-button found:', !!settingsBtn);
     if (settingsBtn) {
-      settingsBtn.addEventListener('click', () => {
-        settingsPanel.show();
+      // Remove any existing listeners by cloning
+      const newBtn = settingsBtn.cloneNode(true);
+      settingsBtn.parentNode.replaceChild(newBtn, settingsBtn);
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Settings button clicked');
+        if (settingsPanel && typeof settingsPanel.show === 'function') {
+          settingsPanel.show();
+        } else {
+          console.error('settingsPanel not available');
+        }
       });
+      console.log('✅ Settings button listener attached');
+    } else {
+      console.warn('⚠️ settings-button not found in DOM');
     }
     
     const logsBtn = document.getElementById('logs-button');
+    console.log('logs-button found:', !!logsBtn);
     if (logsBtn) {
-      logsBtn.addEventListener('click', () => {
-        logsPanel.show();
+      // Remove any existing listeners by cloning
+      const newBtn = logsBtn.cloneNode(true);
+      logsBtn.parentNode.replaceChild(newBtn, logsBtn);
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Logs button clicked');
+        if (logsPanel && typeof logsPanel.show === 'function') {
+          logsPanel.show();
+        } else {
+          console.error('logsPanel not available');
+        }
       });
+      console.log('✅ Logs button listener attached');
+    } else {
+      console.warn('⚠️ logs-button not found in DOM');
     }
     
     // Initialize chat sidebar
@@ -3390,14 +3444,24 @@
     const chatsCloseBtn = document.getElementById('chats-close');
     const newChatBtn = document.getElementById('new-chat-btn');
     
+    console.log('chats-button found:', !!chatsButton);
     if (chatsButton && chatsSidebar) {
-      chatsButton.addEventListener('click', () => {
+      // Remove any existing listeners by cloning
+      const newBtn = chatsButton.cloneNode(true);
+      chatsButton.parentNode.replaceChild(newBtn, chatsButton);
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Chats button clicked');
         chatsSidebar.style.display = chatsSidebar.style.display === 'none' ? 'flex' : 'none';
         document.body.classList.toggle('sidebar-open');
         if (chatsSidebar.style.display === 'flex') {
           loadChatsList();
         }
       });
+      console.log('✅ Chats button listener attached');
+    } else {
+      console.warn('⚠️ chats-button or chats-sidebar not found in DOM');
     }
     
     if (chatsCloseBtn && chatsSidebar) {
@@ -3630,6 +3694,24 @@
         }
       }
     });
+    
+    // Initialize voice assistant from renderer.js after everything else is ready
+    if (typeof window.initializeVoiceAssistant === 'function') {
+      console.log('Calling window.initializeVoiceAssistant from renderer-bundle.js');
+      try {
+        await window.initializeVoiceAssistant();
+      } catch (error) {
+        console.error('Failed to initialize voice assistant:', error);
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Failed to initialize voice assistant: ${error.message}`, error.stack, {
+            source: 'VoiceAssistant',
+            action: 'initialization_failed'
+          });
+        }
+      }
+    } else {
+      console.warn('window.initializeVoiceAssistant not found - voice assistant may not work');
+    }
   }
   
   async function loadConfig() {
