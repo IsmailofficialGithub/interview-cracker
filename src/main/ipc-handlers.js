@@ -182,15 +182,31 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
   });
   
   // Save chat
-  ipcMain.handle('save-chat', async (event, chatId, messages) => {
+  ipcMain.handle('save-chat', async (event, chatId, chatData) => {
     try {
       const key = getSessionKey();
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
       
+      // Handle both old format (array of messages) and new format (object with messages and context)
+      let dataToSave;
+      if (Array.isArray(chatData)) {
+        // Old format - just messages, no context
+        dataToSave = {
+          messages: chatData,
+          context: null
+        };
+      } else {
+        // New format - object with messages and context
+        dataToSave = {
+          messages: chatData.messages || [],
+          context: chatData.context || null
+        };
+      }
+      
       const chatPath = path.join('chats', `${chatId}.enc`);
-      await writeEncryptedJSON(chatPath, messages, key);
+      await writeEncryptedJSON(chatPath, dataToSave, key);
       
       return { success: true };
     } catch (error) {
@@ -208,9 +224,15 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       }
       
       const chatPath = path.join('chats', `${chatId}.enc`);
-      const messages = await readEncryptedJSON(chatPath, key);
+      const data = await readEncryptedJSON(chatPath, key);
       
-      return { success: true, data: messages || [] };
+      // Handle backward compatibility - if data is array, wrap it
+      if (Array.isArray(data)) {
+        return { success: true, data: { messages: data, context: null } };
+      }
+      
+      // New format with context
+      return { success: true, data: data || { messages: [], context: null } };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -274,14 +296,18 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
               // Get file stats for date
               const stats = await fs.stat(chatPath);
               
-              // Try to load chat to get preview
-              const messages = await readEncryptedJSON(path.join('chats', file), key);
+              // Try to load chat to get preview and context
+              const chatData = await readEncryptedJSON(path.join('chats', file), key);
+              // Handle both old format (array) and new format (object)
+              const messages = Array.isArray(chatData) ? chatData : (chatData?.messages || []);
+              const context = Array.isArray(chatData) ? null : (chatData?.context || null);
               const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
               
               return {
                 id: chatId,
                 name: chatId === 'default' ? 'Default Chat' : chatId,
                 preview: lastMessage?.content?.substring(0, 50) || 'No messages yet',
+                context: context,
                 date: stats.mtime,
                 messageCount: messages ? messages.length : 0
               };
@@ -976,13 +1002,13 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
 </head>
 <body>
   <div class="browser-toolbar">
-    ${incognito ? '<div class="incognito-indicator">🔒 Incognito</div>' : ''}
-    <button id="browser-back" class="browser-nav-btn" title="Back">←</button>
-    <button id="browser-forward" class="browser-nav-btn" title="Forward">→</button>
-    <button id="browser-home" class="browser-nav-btn" title="Home">🏠</button>
+    ${incognito ? '<div class="incognito-indicator"><i data-feather="lock" class="icon icon-small"></i> Incognito</div>' : ''}
+    <button id="browser-back" class="browser-nav-btn" title="Back"><i data-feather="chevron-left" class="icon"></i></button>
+    <button id="browser-forward" class="browser-nav-btn" title="Forward"><i data-feather="chevron-right" class="icon"></i></button>
+    <button id="browser-home" class="browser-nav-btn" title="Home"><i data-feather="home" class="icon"></i></button>
     <input type="text" id="browser-url" class="browser-url-bar" placeholder="Enter URL or search..." value="${url}">
     <button id="browser-go" class="browser-nav-btn" title="Go">Go</button>
-    <button id="browser-refresh" class="browser-refresh-btn" title="Refresh">↻</button>
+    <button id="browser-refresh" class="browser-refresh-btn" title="Refresh"><i data-feather="refresh-cw" class="icon"></i></button>
   </div>
   <webview id="browser-webview" src="${url}" style="flex: 1; width: 100%;"></webview>
   <script>

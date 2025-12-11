@@ -107,7 +107,9 @@ class LogsPanel {
             <h2>Application Logs</h2>
             <div class="logs-controls">
               <button id="logs-clear" class="logs-clear-btn">Clear Logs</button>
-              <button id="logs-close" class="logs-close-btn">× Close</button>
+              <button id="logs-close" class="logs-close-btn">
+                <i data-feather="x" class="icon icon-small"></i> Close
+              </button>
             </div>
           </div>
           <div class="logs-filter">
@@ -154,6 +156,11 @@ class LogsPanel {
         this.hide();
       }
     });
+    
+    // Initialize icons
+    if (typeof feather !== 'undefined') {
+      feather.replace();
+    }
     
     // Render logs
     this.renderLogs();

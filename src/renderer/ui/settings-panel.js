@@ -54,7 +54,9 @@ class SettingsPanel {
         <div class="settings-panel-content">
           <div class="settings-header">
             <h2>Settings</h2>
-            <button id="settings-close" class="settings-close-btn">×</button>
+            <button id="settings-close" class="settings-close-btn">
+              <i data-feather="x" class="icon"></i>
+            </button>
           </div>
           <div class="settings-body">
             ${this.renderSettingsContent()}
@@ -81,6 +83,11 @@ class SettingsPanel {
     
     // Setup form handlers
     this.setupFormHandlers();
+    
+    // Initialize icons
+    if (typeof feather !== 'undefined') {
+      feather.replace();
+    }
   }
   
   /**

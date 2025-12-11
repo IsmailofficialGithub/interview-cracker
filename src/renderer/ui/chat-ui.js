@@ -12,6 +12,7 @@ class ChatUI {
     this.sendButton = null;
     this.messages = [];
     this.currentChatId = 'default';
+    this.context = null; // Optional context/description for the chat
     this.autoSaveTimer = null;
     this.isBlurred = false;
   }
@@ -170,7 +171,14 @@ class ChatUI {
     try {
       const result = await window.electronAPI.loadChat(this.currentChatId);
       if (result.success && result.data) {
-        this.messages = result.data;
+        // Handle both old format (array of messages) and new format (object with messages and context)
+        if (Array.isArray(result.data)) {
+          this.messages = result.data;
+          this.context = null;
+        } else {
+          this.messages = result.data.messages || [];
+          this.context = result.data.context || null;
+        }
         this.rerenderMessages();
         this.autoScroll();
       }
@@ -184,10 +192,43 @@ class ChatUI {
    */
   async saveChatHistory() {
     try {
-      await window.electronAPI.saveChat(this.currentChatId, this.messages);
+      // Save with context if available
+      const chatData = {
+        messages: this.messages,
+        context: this.context || null
+      };
+      await window.electronAPI.saveChat(this.currentChatId, chatData);
     } catch (error) {
       console.error('Failed to save chat history:', error);
     }
+  }
+  
+  /**
+   * Set chat context/description
+   * @param {string} context - Context text
+   */
+  setContext(context) {
+    this.context = context || null;
+    this.scheduleAutoSave();
+  }
+  
+  /**
+   * Get chat context
+   * @returns {string|null} Context text
+   */
+  getContext() {
+    return this.context;
+  }
+  
+  /**
+   * Switch to a different chat
+   * @param {string} chatId - Chat ID
+   * @param {string|null} context - Optional context
+   */
+  async switchChat(chatId, context = null) {
+    this.currentChatId = chatId;
+    this.context = context;
+    await this.loadChatHistory();
   }
   
   /**

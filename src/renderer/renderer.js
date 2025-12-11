@@ -20,6 +20,78 @@ let config = null;
 let voiceAssistant = null;
 
 /**
+ * Show new chat modal - DEFINED EARLY
+ */
+function showNewChatModal() {
+  console.log('=== showNewChatModal called ===');
+  const modal = document.getElementById('new-chat-modal');
+  console.log('Modal element found:', !!modal);
+  
+  if (!modal) {
+    console.error('ERROR: New chat modal element not found in DOM!');
+    alert('Error: Modal not found. Please refresh the page.');
+    return;
+  }
+  
+  // Show the modal - remove hidden attribute and set styles
+  modal.removeAttribute('hidden');
+  modal.style.display = 'flex';
+  modal.style.visibility = 'visible';
+  modal.style.opacity = '1';
+  modal.style.position = 'fixed';
+  modal.style.top = '0';
+  modal.style.left = '0';
+  modal.style.right = '0';
+  modal.style.bottom = '0';
+  modal.style.zIndex = '1001';
+  modal.style.background = 'rgba(0, 0, 0, 0.8)';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.classList.add('show');
+  
+  console.log('Modal display:', modal.style.display);
+  console.log('Modal visibility:', modal.style.visibility);
+  
+  // Clear and focus inputs
+  const nameInput = document.getElementById('new-chat-name');
+  if (nameInput) {
+    nameInput.value = '';
+    setTimeout(() => nameInput.focus(), 100);
+  }
+  
+  const contextInput = document.getElementById('new-chat-context');
+  if (contextInput) {
+    contextInput.value = '';
+  }
+  
+  console.log('Modal should now be visible');
+}
+
+/**
+ * Hide new chat modal
+ */
+function hideNewChatModal() {
+  console.log('hideNewChatModal called');
+  const modal = document.getElementById('new-chat-modal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.style.visibility = 'hidden';
+    modal.style.opacity = '0';
+    modal.setAttribute('hidden', 'true');
+    modal.classList.remove('show');
+    console.log('Modal hidden');
+  }
+}
+
+// Make functions globally available IMMEDIATELY - BEFORE any async operations
+// This ensures renderer-bundle.js can access them
+if (typeof window !== 'undefined') {
+  window.showNewChatModal = showNewChatModal;
+  window.hideNewChatModal = hideNewChatModal;
+  console.log('showNewChatModal and hideNewChatModal attached to window');
+}
+
+/**
  * Initialize application
  */
 async function initialize() {
@@ -76,13 +148,17 @@ async function loadApplication() {
     if (typeof VoiceAssistant !== 'undefined' || typeof window.VoiceAssistant !== 'undefined') {
       const VoiceAssistantClass = VoiceAssistant || window.VoiceAssistant;
       voiceAssistant = new VoiceAssistantClass();
-      await voiceAssistant.initialize();
+      // Pass chatUI reference for message history and context
+      await voiceAssistant.initialize(chatUI);
+      
+      // Make globally available for old system to check
+      window.voiceAssistant = voiceAssistant;
       
       // Setup callbacks
-      voiceAssistant.onTranscription = (text) => {
+        voiceAssistant.onTranscription = (text) => {
         // Show transcription in chat
         if (chatUI && chatUI.messages) {
-          chatUI.addMessage('user', `[Voice] ${text}`);
+          chatUI.addMessage('user', text);
         }
       };
       
@@ -138,6 +214,53 @@ async function loadApplication() {
   // Setup provider selector
   setupProviderSelector();
   
+  // FORCE HIDE modal on startup - multiple ways to ensure it's hidden
+  const modal = document.getElementById('new-chat-modal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.style.visibility = 'hidden';
+    modal.style.opacity = '0';
+    modal.setAttribute('hidden', 'true');
+    modal.classList.remove('show');
+    console.log('Modal forcefully hidden on startup');
+  }
+  
+  // Setup new chat modal handlers
+  setupNewChatModal();
+  
+  // Functions are already globally available (defined at top of file)
+  
+  // Setup new chat button - use event delegation since button might be in hidden sidebar
+  // Use capture phase to run before renderer-bundle.js handler
+  document.addEventListener('click', (e) => {
+    // Check if clicked element or its parent is the new-chat-btn
+    const target = e.target.closest('#new-chat-btn') || 
+                   (e.target.id === 'new-chat-btn' ? e.target : null) ||
+                   (e.target.closest('.new-chat-btn') ? e.target.closest('.new-chat-btn') : null);
+    if (target) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      console.log('New chat button clicked - showing modal', target);
+      showNewChatModal();
+      return false;
+    }
+  }, true); // Capture phase
+  
+  // Also try direct attachment as fallback
+  setTimeout(() => {
+    const newChatBtn = document.getElementById('new-chat-btn');
+    if (newChatBtn) {
+      console.log('Found new-chat-btn, attaching direct handler');
+      newChatBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Direct handler: New chat button clicked');
+        showNewChatModal();
+      }, true);
+    }
+  }, 1000);
+  
   // Listen for chat send message event
   window.addEventListener('chat-send-message', async (e) => {
     const content = e.detail.content;
@@ -148,6 +271,139 @@ async function loadApplication() {
       console.error('Failed to send message:', error);
     }
   });
+}
+
+/**
+ * Setup new chat modal handlers
+ */
+function setupNewChatModal() {
+  const modal = document.getElementById('new-chat-modal');
+  const form = document.getElementById('new-chat-form');
+  const cancelBtn = document.getElementById('new-chat-cancel');
+  const submitBtn = document.getElementById('new-chat-submit');
+  
+  console.log('setupNewChatModal called - modal:', !!modal, 'form:', !!form, 'cancelBtn:', !!cancelBtn, 'submitBtn:', !!submitBtn);
+  
+  if (!modal || !form || !cancelBtn || !submitBtn) {
+    console.warn('Modal elements not found, will retry later');
+    // Retry after a delay in case DOM isn't ready
+    setTimeout(() => setupNewChatModal(), 500);
+    return;
+  }
+  
+  // Ensure modal is hidden on startup - FORCE HIDE
+  modal.style.display = 'none';
+  modal.style.visibility = 'hidden';
+  modal.style.opacity = '0';
+  modal.setAttribute('hidden', 'true');
+  
+  // Button handlers are now set up inline in HTML to ensure they work
+  // These handlers in renderer.js are backup/override handlers
+  // Cancel button handler - use direct button reference
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('Cancel button clicked (renderer.js handler)');
+      hideNewChatModal();
+    }, true);
+  }
+  
+  // Submit button handler - use direct button reference
+  if (submitBtn) {
+    submitBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('Submit button clicked (renderer.js handler)');
+      // Trigger form submit
+      if (form) {
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      }
+    }, true);
+  }
+  
+  // Close on overlay click (but not when clicking inside modal content)
+  modal.addEventListener('click', (e) => {
+    // Only close if clicking the overlay itself, not the modal content
+    if (e.target === modal) {
+      console.log('Overlay clicked, closing modal');
+      hideNewChatModal();
+    }
+  });
+  
+  // Prevent modal content clicks from closing the modal
+  const modalContent = modal.querySelector('.new-chat-modal-content');
+  if (modalContent) {
+    modalContent.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent click from bubbling to overlay
+    });
+  }
+  
+  // Form submit
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('Form submitted');
+    
+    const nameInput = document.getElementById('new-chat-name');
+    const contextInput = document.getElementById('new-chat-context');
+    
+    const chatName = nameInput ? nameInput.value.trim() : '';
+    const context = contextInput ? contextInput.value.trim() : '';
+    
+    console.log('Creating new chat - name:', chatName, 'context:', context);
+    
+    // Generate chat ID
+    const chatId = chatName || `chat-${Date.now()}`;
+    
+    try {
+      // Use the ChatUI from renderer-bundle.js if available
+      const activeChatUI = window.chatUI || chatUI;
+      if (activeChatUI) {
+        if (typeof activeChatUI.switchChat === 'function') {
+          await activeChatUI.switchChat(chatId, context || null);
+        } else if (typeof activeChatUI.setContext === 'function') {
+          // Use setContext if available
+          activeChatUI.currentChatId = chatId;
+          activeChatUI.setContext(context || null);
+          activeChatUI.messages = [];
+          await activeChatUI.loadChatHistory();
+        } else {
+          // Fallback for old ChatUI
+          activeChatUI.currentChatId = chatId;
+          activeChatUI.context = context || null;
+          activeChatUI.messages = [];
+          if (typeof activeChatUI.loadChatHistory === 'function') {
+            await activeChatUI.loadChatHistory();
+          }
+        }
+        
+        // Clear messages for new chat (new chat should be empty)
+        activeChatUI.messages = [];
+        if (typeof activeChatUI.rerenderMessages === 'function') {
+          activeChatUI.rerenderMessages();
+        }
+        
+        // Save the new chat with context
+        if (typeof activeChatUI.saveChatHistory === 'function') {
+          await activeChatUI.saveChatHistory();
+        }
+        
+        console.log('New chat created successfully - ID:', chatId, 'Context:', context || 'none');
+      } else {
+        console.error('No ChatUI available');
+        alert('Error: Chat UI not initialized. Please refresh the page.');
+        return;
+      }
+      
+      hideNewChatModal();
+    } catch (error) {
+      console.error('Error creating new chat:', error);
+      alert('Error creating new chat: ' + error.message);
+    }
+  });
+  
+  console.log('Modal setup complete - buttons should work now');
 }
 
 /**
@@ -246,13 +502,40 @@ async function sendAIMessage(messageContent) {
     content: messageContent
   });
   
+  // Get chat context if available
+  const chatContext = (chatUI && typeof chatUI.getContext === 'function') 
+    ? chatUI.getContext() 
+    : (window.chatUI && typeof window.chatUI.getContext === 'function')
+      ? window.chatUI.getContext()
+      : null;
+  
+  // Build messages with system prompt and context
+  let systemPrompt = 'You are a helpful AI assistant. Provide clear, accurate responses.';
+  if (chatContext) {
+    systemPrompt = `Context: ${chatContext}. ${systemPrompt}`;
+  }
+  
+  // Include context in user message for better awareness
+  if (chatContext && messages.length > 0) {
+    const lastUserMsg = messages[messages.length - 1];
+    if (lastUserMsg.role === 'user') {
+      lastUserMsg.content = `[Context: ${chatContext}] ${lastUserMsg.content}`;
+    }
+  }
+  
+  // Prepend system message
+  const messagesWithSystem = [
+    { role: 'system', content: systemPrompt },
+    ...messages
+  ];
+  
   // Stream response
   let fullResponse = '';
   
   try {
     await aiProviderManager.streamMessage(
       currentProviderId,
-      messages,
+      messagesWithSystem,
       {},
       (chunk) => {
         fullResponse += chunk;
@@ -281,4 +564,15 @@ if (document.readyState === 'loading') {
 } else {
   initialize();
 }
+
+// Test function for debugging - type window.testShowModal() in console
+window.testShowModal = function() {
+  console.log('=== TEST: Calling showNewChatModal ===');
+  if (typeof window.showNewChatModal === 'function') {
+    window.showNewChatModal();
+  } else {
+    console.error('ERROR: window.showNewChatModal not found!');
+    alert('Error: showNewChatModal function not available. Check console.');
+  }
+};
 
