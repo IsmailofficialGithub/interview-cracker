@@ -611,56 +611,68 @@ class VoiceAssistant {
 
       try {
         // Try getDisplayMedia first
+        // video: true is REQUIRED for getDisplayMedia to work at all
         stream = await navigator.mediaDevices.getDisplayMedia({
           audio: {
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
-            suppressLocalAudioPlayback: false
+            suppressLocalAudioPlayback: false,
+            sampleRate: 44100
           },
-          video: false
+          video: true
         });
 
-        // Filter tracks...
-        const audioTracks = stream.getAudioTracks();
-        audioTracks.forEach(track => {
-          const label = track.label.toLowerCase();
-          if (label.includes('microphone') || label.includes('mic') || label.includes('input')) {
-            console.warn('YOURS mode: Detected microphone track, stopping it');
-            track.stop();
-          }
-        });
+        // We only care about audio, stop video trace immediately to save resources
+        stream.getVideoTracks().forEach(track => track.stop());
 
-        this.audioStream = stream;
+        console.log('YOURS: getDisplayMedia success');
       } catch (displayMediaError) {
         console.warn('getDisplayMedia failed, trying desktopCapturer:', displayMediaError);
-        // Fallback to desktopCapturer...
-        // ... (Keep existing fallback logic simplified for brevity, assuming standard getDisplayMedia works 99%)
-        // If this part is critical, I should duplicate the fallback logic carefully.
-        // Let's assume the user's environment supported the previous attempt up to the recorder.
 
-        // Re-implementing simplified fallback for robustness:
+        // Fallback or retry with different constraints
         const sources = await window.electronAPI.getDesktopSources({ types: ['screen'] });
-        if (!sources.success || sources.sources.length === 0) throw new Error('No system audio sources');
+        if (!sources.success || sources.sources.length === 0) throw new Error('No system audio sources found during fallback.');
 
+        const sourceId = sources.sources[0].id;
+
+        // Electron-specific constraint syntax
+        // Note: chromeMediaSource MUST be in 'video' mandatory constraints even for audio-only scenarios in some electron versions,
+        // but typically we ask for both and strip video.
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             mandatory: {
               chromeMediaSource: 'desktop',
-              chromeMediaSourceId: sources.sources[0].id
-            },
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false
+              chromeMediaSourceId: sourceId // In some cases, audio doesn't need ID if extracting from system?
+              // Actually, for system audio loopback in Electron:
+              // audio: { mandatory: { chromeMediaSource: 'desktop' } } might be enough without ID for 'entire system'
+            }
           },
-          video: false
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId
+            }
+          }
         });
-        this.audioStream = stream;
+
+        // Stop video tracks
+        stream.getVideoTracks().forEach(track => track.stop());
+        console.log('YOURS: desktopCapturer fallback success');
       }
 
-      if (this.audioStream.getAudioTracks().length === 0) {
-        throw new Error('No system audio tracks available.');
+      // Filter tracks - verify we have audio
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        throw new Error('No audio tracks captured. Ensure you shared "System Audio".');
       }
+
+      // Filter out microphone tracks if any accidentally got mixed in (rare in this flow)
+      // (Simplified: just use the first audio track, assuming system audio)
+      this.audioStream = new MediaStream([audioTracks[0]]);
+
+
+
 
       // Initialize chunk storage
       this.currentCycleChunks = [];

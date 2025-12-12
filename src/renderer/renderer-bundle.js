@@ -2151,19 +2151,29 @@
      */
     async switchChat(chatId, context = null) {
       this.currentChatId = chatId;
-      this.context = context;
 
-      // Try to load existing chat, but if it doesn't exist, start with empty chat
+      // Try to load existing chat
       try {
         await this.loadChatHistory();
       } catch (error) {
-        // Chat doesn't exist yet, start with empty chat
-        console.log('New chat - starting with empty messages');
+        // Chat might not exist yet, that's fine
+        console.log('Chat load failed (likely new):', error);
         this.messages = [];
+        this.context = null;
+      }
+
+      // If context is explicitly provided (e.g. New Chat), override whatever was loaded
+      if (context !== null) {
         this.context = context;
-        // Save the new chat immediately
+        // Save immediately to ensure file exists and context is persisted
         await this.saveChatHistory();
-        this.rerenderMessages();
+      }
+
+      this.rerenderMessages();
+
+      // Update the sidebar list to show the new/active chat
+      if (typeof loadChatsList === 'function') {
+        loadChatsList();
       }
     }
 
@@ -3588,8 +3598,11 @@
         });
       }
 
+      // Retrieve context if available
+      const chatContext = (chatUI && typeof chatUI.getContext === 'function') ? chatUI.getContext() : null;
+
       // Prepare messages array
-      const messages = chatUI.messages
+      let messages = chatUI.messages
         .filter((msg, idx) => idx < loadingIndex) // Exclude loading message
         .map(msg => {
           // Ensure message has required fields
@@ -3603,6 +3616,36 @@
           };
         })
         .filter(msg => msg !== null); // Remove invalid messages
+
+      // Add system prompt with context if available
+      if (chatContext) {
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', `Adding context to conversation: "${chatContext.substring(0, 50)}..."`);
+        }
+
+        // Check if there's already a system message
+        const systemMsgIndex = messages.findIndex(m => m.role === 'system');
+
+        if (systemMsgIndex >= 0) {
+          // Append to existing system message
+          messages[systemMsgIndex].content = `Context: ${chatContext}\n\n${messages[systemMsgIndex].content}`;
+        } else {
+          // Prepend new system message
+          messages.unshift({
+            role: 'system',
+            content: `Context: ${chatContext}\n\nYou are a helpful AI assistant. Use the above context to inform your responses.`
+          });
+        }
+      } else {
+        // Ensure there is at least a basic system prompt if none exists
+        const systemMsgIndex = messages.findIndex(m => m.role === 'system');
+        if (systemMsgIndex === -1) {
+          messages.unshift({
+            role: 'system',
+            content: 'You are a helpful AI assistant.'
+          });
+        }
+      }
 
       // Validate we have at least one message
       if (messages.length === 0) {
@@ -3978,18 +4021,44 @@
                 <div class="chat-item-date">${dateStr}</div>
               </div>
               <div class="chat-item-actions">
-                <button class="chat-delete-btn" data-chat-id="${chat.id}" title="Delete chat">🗑️</button>
+                <button class="chat-edit-btn" data-chat-id="${chat.id}" title="Edit chat"><i data-feather="edit-2" class="icon-tiny"></i></button>
+                <button class="chat-delete-btn" data-chat-id="${chat.id}" title="Delete chat"><i data-feather="trash-2" class="icon-tiny"></i></button>
               </div>
             </div>
           `;
         }).join('');
 
+        // Render icons
+        if (typeof feather !== 'undefined') {
+          feather.replace();
+        }
+
         // Add click handlers
         chatsList.querySelectorAll('.chat-item').forEach(item => {
           item.addEventListener('click', (e) => {
-            if (!e.target.classList.contains('chat-delete-btn')) {
+            // Only load if not clicking buttons
+            if (!e.target.closest('.chat-item-actions')) {
               const chatId = item.dataset.chatId;
               loadChat(chatId);
+            }
+          });
+        });
+
+        // Add edit handlers
+        chatsList.querySelectorAll('.chat-edit-btn').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const chatId = btn.dataset.chatId;
+            const chatItem = btn.closest('.chat-item');
+            const nameEl = chatItem.querySelector('.chat-item-name');
+            const currentName = nameEl ? nameEl.textContent : '';
+
+            // Load the chat first to get its context
+            await loadChat(chatId);
+
+            // Now chatUI.context should be set
+            if (typeof window.showNewChatModal === 'function') {
+              window.showNewChatModal(chatId, currentName, chatUI.context);
             }
           });
         });
@@ -4075,6 +4144,7 @@
 
   // Expose functions for settings panel
   window.loadConfig = loadConfig;
+  window.loadChatsList = loadChatsList;
   window.setupProviderSelector = setupProviderSelector;
   window.currentProviderId = currentProviderId; // Expose as property for easy access
   window.getCurrentProviderId = () => currentProviderId;
