@@ -763,32 +763,25 @@ class VoiceAssistant {
               this.onTranscription(text);
             }
 
-            if (this.mode === 'mine') {
-              console.log('Mine mode: Auto-filling input and clicking send');
+            console.log(`Voice mode (${this.mode}): Auto-filling input and clicking send`);
 
-              // Find input and send button
-              const input = this.chatUI?.inputArea || document.getElementById('message-input');
-              const sendBtn = this.chatUI?.sendButton || document.getElementById('send-button');
+            // Find input and send button
+            const input = this.chatUI?.inputArea || document.getElementById('message-input');
+            const sendBtn = this.chatUI?.sendButton || document.getElementById('send-button');
 
-              if (input && sendBtn) {
-                // Set input value
-                input.value = text;
-                // Trigger input event to ensure any binding/resizing happens
-                input.dispatchEvent(new Event('input', { bubbles: true }));
+            if (input && sendBtn) {
+              // Set input value
+              input.value = text;
+              // Trigger input event to ensure any binding/resizing happens
+              input.dispatchEvent(new Event('input', { bubbles: true }));
 
-                // Click send button to use the standard chat logic
-                // This ensures we get the "100% working" chat behavior user wants
-                setTimeout(() => {
-                  sendBtn.click();
-                }, 100);
-              } else {
-                console.warn('VoiceAssistant: Could not find input or send button, falling back to internal response generation');
-                await this.generateResponse(text);
-              }
+              // Click send button to use the standard chat logic
+              // This ensures we get the "100% working" chat behavior user wants
+              setTimeout(() => {
+                sendBtn.click();
+              }, 100);
             } else {
-              // For 'yours' mode (system audio), keep using internal generation 
-              // to maintain specific system prompts and context handling
-              console.log('Yours mode: Calling internal generateResponse');
+              console.warn('VoiceAssistant: Could not find input or send button, falling back to internal response generation');
               await this.generateResponse(text);
             }
           }

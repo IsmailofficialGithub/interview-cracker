@@ -1660,6 +1660,76 @@
       color: #ff4444;
       background: rgba(255, 68, 68, 0.1);
     }
+
+    /* Onboarding Modal */
+    .onboarding-modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+
+    .onboarding-modal-content {
+      background: #252525;
+      border: 1px solid #444;
+      border-radius: 12px;
+      padding: 32px;
+      max-width: 600px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .onboarding-step {
+      display: none;
+    }
+
+    .onboarding-step.active {
+      display: block;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .onboarding-modal-content h2 {
+      margin-bottom: 16px;
+      color: #fff;
+    }
+
+    .onboarding-modal-content h3 {
+      margin-bottom: 8px;
+      color: #e0e0e0;
+    }
+
+    .onboarding-modal-content p,
+    .onboarding-modal-content li {
+      color: #ccc;
+      line-height: 1.6;
+    }
+
+    .onboarding-actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid #444;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(5px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
   </style>
 </head>
 
@@ -1680,6 +1750,9 @@
       <button id="logs-button" class="settings-button" title="View Logs">
         <i data-feather="file-text" class="icon icon-small"></i> Logs
       </button>
+      <button id="guide-button" class="settings-button" title="View Guide">
+        <i data-feather="help-circle" class="icon icon-small"></i> Guide
+      </button>
       <button id="settings-button" class="settings-button">
         <i data-feather="settings" class="icon icon-small"></i> Settings
       </button>
@@ -1699,6 +1772,62 @@
     </div>
     <div id="chats-list" class="chats-list">
       <!-- Chats will be listed here -->
+    </div>
+  </div>
+
+  <!-- Onboarding Modal -->
+  <div id="onboarding-modal" class="onboarding-modal-overlay" style="display: none;" hidden>
+    <div class="onboarding-modal-content">
+      <!-- Step 1 -->
+      <div id="onboarding-step-1" class="onboarding-step active" data-step="1">
+        <h2>Welcome to Private AI Chat! 👋</h2>
+        <p>Your secure, local AI assistant designed to help you communicate effectively.</p>
+        <div style="margin: 20px 0; background: #333; padding: 16px; border-radius: 8px;">
+          <h3>🚀 How it works</h3>
+          <p>This app runs locally on your machine. To give it brains, you need to connect your own AI provider (like
+            Google Gemini, OpenAI, or Groq).</p>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div id="onboarding-step-2" class="onboarding-step" data-step="2">
+        <h2>🛠️ Setup API</h2>
+        <p>To start chatting, you need to configure an API Key.</p>
+        <div style="margin: 20px 0;">
+          <ol style="margin-left: 20px; color: #ccc;">
+            <li style="margin-bottom: 8px;">Click the <strong>Settings</strong> button <i data-feather="settings"
+                class="icon-tiny"></i> in the top right.</li>
+            <li style="margin-bottom: 8px;">Go to the <strong>API</strong> tab.</li>
+            <li style="margin-bottom: 8px;">Select your provider (e.g., Google Gemini) and paste your API Key.</li>
+            <li>Click <strong>Save</strong>.</li>
+          </ol>
+        </div>
+        <p style="font-size: 0.9em; opacity: 0.7;">Don't have a key? Search for "Gemini API Key" or "Groq API Key" to
+          get one for free.</p>
+      </div>
+
+      <!-- Step 3 -->
+      <div id="onboarding-step-3" class="onboarding-step" data-step="3">
+        <h2>🎤 Voice Modes</h2>
+        <p>Supercharge your workflow with voice integration:</p>
+        <div style="margin: 20px 0; display: grid; gap: 16px;">
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #4a9eff;">MINE Mode <i data-feather="mic" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">Uses your microphone. Speak to the AI, and it will auto-fill
+              the chat and send for you.</p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #ff9e4a;">YOURS Mode <i data-feather="volume-2" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">Listens to your system audio (screen sharing). Great for
+              getting help during meetings or summarizing videos.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="onboarding-actions">
+        <button id="onboarding-skip" class="settings-button">Skip</button>
+        <button id="onboarding-next" class="save-btn">Next</button>
+      </div>
     </div>
   </div>
 
@@ -2041,8 +2170,67 @@
         } else {
           console.log('App appears to have loaded. chatUI:', !!window.chatUI);
           if (typeof feather !== 'undefined') feather.replace();
+
+          // Trigger Onboarding Check
+          if (typeof checkOnboarding === 'function') checkOnboarding();
         }
       }, 1000);
+    });
+
+    // Onboarding Logic
+    let currentStep = 1;
+    const totalSteps = 3;
+
+    function showOnboarding() {
+      const modal = document.getElementById('onboarding-modal');
+      if (modal) {
+        currentStep = 1;
+        updateOnboardingStep();
+        modal.removeAttribute('hidden');
+        modal.style.display = 'flex';
+      }
+    }
+
+    function hideOnboarding() {
+      const modal = document.getElementById('onboarding-modal');
+      if (modal) {
+        modal.style.display = 'none';
+      }
+      localStorage.setItem('onboardingCompleted', 'true');
+    }
+
+    function updateOnboardingStep() {
+      document.querySelectorAll('.onboarding-step').forEach(el => el.classList.remove('active'));
+      const activeStep = document.getElementById(`onboarding-step-${currentStep}`);
+      if (activeStep) activeStep.classList.add('active');
+
+      const nextBtn = document.getElementById('onboarding-next');
+      if (nextBtn) {
+        nextBtn.textContent = currentStep === totalSteps ? 'Finish' : 'Next';
+      }
+    }
+
+    function checkOnboarding() {
+      if (!localStorage.getItem('onboardingCompleted')) {
+        showOnboarding();
+      }
+    }
+
+    document.getElementById('guide-button')?.addEventListener('click', () => {
+      showOnboarding();
+    });
+
+    document.getElementById('onboarding-skip')?.addEventListener('click', () => {
+      hideOnboarding();
+    });
+
+    document.getElementById('onboarding-next')?.addEventListener('click', () => {
+      if (currentStep < totalSteps) {
+        currentStep++;
+        updateOnboardingStep();
+      } else {
+        hideOnboarding();
+      }
     });
   </script>
 </body>
