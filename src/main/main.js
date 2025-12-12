@@ -76,6 +76,31 @@ function createWindow() {
       mainWindow.focus();
     }
   });
+    // Show window when ready
+    mainWindow.once('ready-to-show', () => {
+      if (mainWindow) {
+        mainWindow.show();
+        // Ensure always-on-top is enabled
+        mainWindow.setAlwaysOnTop(true);
+        mainWindow.focus();
+        
+        // Open DevTools in development (F12 or Ctrl+Shift+I)
+        if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
+          // Open DevTools automatically in dev mode
+          mainWindow.webContents.openDevTools();
+        }
+      }
+    });
+      // Keyboard shortcut to toggle DevTools (F12 or Ctrl+Shift+I)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) {
+      if (mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.closeDevTools();
+      } else {
+        mainWindow.webContents.openDevTools();
+      }
+    }
+  });
 
   // Handle window closed
   mainWindow.on('closed', () => {

@@ -1,13 +1,13 @@
 /**
  * Real-Time Voice Assistant
  * Supports two modes:
- * 1. SELF MODE: Microphone input, user speaking directly
- * 2. LISTEN MODE: System audio/environment audio capture
+ * 1. MINE MODE: Microphone input, user speaking directly
+ * 2. YOURS MODE: System audio/environment audio capture
  */
 
 class VoiceAssistant {
   constructor() {
-    this.mode = 'self'; // 'self' or 'listen'
+    this.mode = 'mine'; // 'mine' or 'yours'
     this.isActive = false;
     this.isProcessing = false;
     
@@ -27,9 +27,13 @@ class VoiceAssistant {
     
     // State
     this.lastTranscription = '';
-    this.conversationHistory = [];
     this.responseBuffer = '';
     this.lastProcessedChunkIndex = 0; // Track which chunks have been processed
+    this.lastTranscriptionTime = 0; // For debouncing
+    this.recentTranscriptions = []; // Track recent transcriptions to avoid duplicates
+    
+    // Chat integration
+    this.chatUI = null; // Reference to ChatUI instance
     
     // UI elements
     this.statusIndicator = null;
@@ -44,8 +48,10 @@ class VoiceAssistant {
   
   /**
    * Initialize the voice assistant
+   * @param {ChatUI} chatUI - Reference to ChatUI instance for message history
    */
-  async initialize() {
+  async initialize(chatUI = null) {
+    this.chatUI = chatUI;
     await this.loadConfig();
     this.setupUI();
   }
@@ -103,15 +109,26 @@ class VoiceAssistant {
       }
       this.statusIndicator = statusEl;
       
-      // Find or create mode toggle button (should already exist in HTML)
-      let modeBtn = document.getElementById('voice-mode-toggle');
-      if (!modeBtn) {
+      // Find or create mode toggle switch (should already exist in HTML)
+      let modeToggle = document.getElementById('voice-mode-toggle');
+      if (!modeToggle) {
         // Create if it doesn't exist
-        modeBtn = document.createElement('button');
-        modeBtn.id = 'voice-mode-toggle';
-        modeBtn.className = 'voice-mode-toggle';
-        modeBtn.textContent = '🎤 SELF';
-        modeBtn.title = 'Click to switch to LISTEN mode';
+        modeToggle = document.createElement('div');
+        modeToggle.id = 'voice-mode-toggle';
+        modeToggle.className = 'voice-mode-toggle';
+        modeToggle.innerHTML = `
+          <span class="toggle-option active" data-mode="mine">
+            <i data-feather="mic" class="icon"></i> MINE
+          </span>
+          <span class="toggle-option" data-mode="yours">
+            <i data-feather="volume-2" class="icon"></i> YOURS
+          </span>
+        `;
+        // Initialize icons after adding to DOM
+        if (typeof feather !== 'undefined') {
+          feather.replace();
+        }
+        modeToggle.title = 'Toggle between MINE MODE (Microphone) and YOURS MODE (System Audio)';
         
         // Try multiple selectors to find input area
         let inputArea = document.querySelector('.input-area');
@@ -126,39 +143,113 @@ class VoiceAssistant {
         }
         
         if (inputArea) {
-          inputArea.insertBefore(modeBtn, inputArea.firstChild);
-          console.log('Voice mode toggle button created and added to input area');
+          inputArea.insertBefore(modeToggle, inputArea.firstChild);
+          console.log('Voice mode toggle switch created and added to input area');
         } else {
-          console.error('Could not find input area to insert mode toggle button');
+          console.error('Could not find input area to insert mode toggle switch');
         }
       } else {
-        console.log('Voice mode toggle button found in DOM');
+        console.log('Voice mode toggle switch found in DOM');
       }
       
-      this.modeButton = modeBtn;
+      this.modeButton = modeToggle;
       
-      // Remove existing listeners by removing and re-adding the event listener
-      // Use a named function so we can remove it if needed
+      // Use event delegation on the toggle container to handle all clicks
       const modeToggleHandler = async (e) => {
+        console.log('=== TOGGLE CLICK DETECTED ===');
+        console.log('Target:', e.target);
+        console.log('Target tagName:', e.target.tagName);
+        console.log('Target classList:', e.target.classList?.toString());
+        console.log('CurrentTarget:', e.currentTarget);
+        console.log('ModeButton:', this.modeButton);
+        
         e.preventDefault();
         e.stopPropagation();
-        console.log('Mode toggle clicked, current mode:', this.mode);
-        try {
-          await this.toggleMode();
-        } catch (error) {
-          console.error('Error in toggleMode:', error);
+        
+        // Find the clicked toggle option - use closest which works even with pointer-events: none
+        const clickedOption = e.target.closest('.toggle-option');
+        
+        console.log('Clicked option:', clickedOption);
+        
+        if (clickedOption) {
+          // Click was on a toggle option (or its child)
+          const targetMode = clickedOption.getAttribute('data-mode');
+          console.log('Toggle option clicked, target mode:', targetMode, 'current mode:', this.mode);
+          
+          if (targetMode && targetMode !== this.mode) {
+            // Switch to the clicked mode
+            console.log('Switching mode from', this.mode, 'to:', targetMode);
+            try {
+              await this.setMode(targetMode);
+            } catch (error) {
+              console.error('Error in setMode:', error);
+            }
+          } else if (targetMode === this.mode) {
+            console.log('Same mode clicked, no change needed');
+          }
+        } else {
+          // Click was on the container itself (not on an option) - toggle between modes
+          console.log('Mode toggle container clicked, current mode:', this.mode);
+          try {
+            await this.toggleMode();
+          } catch (error) {
+            console.error('Error in toggleMode:', error);
+          }
         }
       };
       
       // Remove any existing listener first
-      this.modeButton.removeEventListener('click', modeToggleHandler);
-      // Add the new listener
-      this.modeButton.addEventListener('click', modeToggleHandler);
+      if (this._modeToggleHandler) {
+        this.modeButton.removeEventListener('click', this._modeToggleHandler, true);
+      }
+      
+      // Add the new listener with capture phase to ensure it fires
+      this.modeButton.addEventListener('click', modeToggleHandler, true);
       
       // Store handler for potential cleanup
       this._modeToggleHandler = modeToggleHandler;
       
+      console.log('Toggle switch event handler attached to:', this.modeButton);
+      console.log('Toggle element:', this.modeButton);
+      console.log('Toggle options:', this.modeButton.querySelectorAll('.toggle-option'));
+      
+      // ALSO add direct handlers to each toggle option as a backup
+      // This ensures clicks work even if event delegation has issues
+      const toggleOptions = this.modeButton.querySelectorAll('.toggle-option');
+      toggleOptions.forEach(option => {
+        // Remove any existing handlers by cloning
+        const newOption = option.cloneNode(true);
+        if (option.parentNode) {
+          option.parentNode.replaceChild(newOption, option);
+        }
+        
+        // Add click handler
+        newOption.addEventListener('click', async (e) => {
+          console.log('DIRECT OPTION HANDLER FIRED!', newOption.getAttribute('data-mode'));
+          e.preventDefault();
+          e.stopPropagation();
+          
+          const targetMode = newOption.getAttribute('data-mode');
+          if (targetMode && targetMode !== this.mode) {
+            console.log('Direct handler: Switching mode from', this.mode, 'to:', targetMode);
+            try {
+              await this.setMode(targetMode);
+            } catch (error) {
+              console.error('Error in setMode:', error);
+            }
+          }
+        });
+        
+        // Make sure it's clickable
+        newOption.style.cursor = 'pointer';
+        newOption.style.pointerEvents = 'auto';
+      });
+      
+      // Initial UI update to set correct state
+      this.updateUI();
+      
       // Update listen button - use the existing button, don't clone
+      // Make sure we run this AFTER the old system setup to override it
       const listenBtn = document.getElementById('listen-button');
       if (listenBtn) {
         this.startButton = listenBtn;
@@ -168,23 +259,29 @@ class VoiceAssistant {
           this.startButton.parentNode.replaceChild(newListenBtn, this.startButton);
         }
         this.startButton = newListenBtn;
+        
+        // Add our handler with higher priority (capture phase)
         this.startButton.addEventListener('click', async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          console.log('Start/Stop button clicked, current state:', this.isActive);
+          e.stopImmediatePropagation(); // Prevent other handlers
+          console.log('VoiceAssistant: Start/Stop button clicked, current state:', this.isActive, 'mode:', this.mode);
           await this.toggle();
-        });
+        }, true); // Use capture phase to run before other handlers
+        
+        // Make VoiceAssistant globally available so old system can check
+        window.voiceAssistant = this;
       } else {
         console.warn('Listen button not found');
       }
       
       this.updateUI();
       console.log('Voice Assistant UI setup complete. Mode button:', this.modeButton);
-    }, 100); // Small delay to ensure DOM is ready
+    }, 200); // Delay to ensure DOM is ready and other systems are initialized
   }
   
   /**
-   * Toggle between SELF and LISTEN modes
+   * Toggle between MINE and YOURS modes
    */
   async toggleMode() {
     console.log('toggleMode called, current mode:', this.mode, 'isActive:', this.isActive);
@@ -195,12 +292,34 @@ class VoiceAssistant {
     }
     
     // Toggle mode
-    this.mode = this.mode === 'self' ? 'listen' : 'self';
+    this.mode = this.mode === 'mine' ? 'yours' : 'mine';
     console.log('Mode switched to:', this.mode);
     
     // Update UI
     this.updateUI();
-    console.log('UI updated, button text:', this.modeButton?.textContent);
+  }
+  
+  /**
+   * Set mode directly
+   */
+  async setMode(mode) {
+    if (mode !== 'mine' && mode !== 'yours') {
+      console.error('Invalid mode:', mode);
+      return;
+    }
+    
+    console.log('setMode called, current mode:', this.mode, 'new mode:', mode, 'isActive:', this.isActive);
+    
+    if (this.isActive) {
+      console.log('Stopping voice assistant before mode switch');
+      await this.stop();
+    }
+    
+    this.mode = mode;
+    console.log('Mode set to:', this.mode);
+    
+    // Update UI
+    this.updateUI();
   }
   
   /**
@@ -209,27 +328,48 @@ class VoiceAssistant {
   updateUI() {
     console.log('updateUI called, mode:', this.mode, 'isActive:', this.isActive);
     
-    // Update toggle button to show current mode
+    // Update toggle switch to show current mode
     if (this.modeButton) {
-      if (this.mode === 'self') {
-        this.modeButton.textContent = '🎤 SELF MODE';
-        this.modeButton.title = 'Currently: SELF MODE (Microphone). Click to switch to LISTEN MODE (System Audio)';
-        this.modeButton.classList.remove('listen-mode');
-        console.log('Updated toggle button to SELF mode');
+      const toggleOptions = this.modeButton.querySelectorAll('.toggle-option');
+      
+      if (this.mode === 'mine') {
+        this.modeButton.classList.remove('yours-mode');
+        this.modeButton.title = 'Currently: MINE MODE (Microphone). Click to switch to YOURS MODE (System Audio)';
+        toggleOptions.forEach(option => {
+          if (option.getAttribute('data-mode') === 'mine') {
+            option.classList.add('active');
+          } else {
+            option.classList.remove('active');
+          }
+        });
+        console.log('Updated toggle switch to MINE mode');
       } else {
-        this.modeButton.textContent = '🔊 LISTEN MODE';
-        this.modeButton.title = 'Currently: LISTEN MODE (System Audio). Click to switch to SELF MODE (Microphone)';
-        this.modeButton.classList.add('listen-mode');
-        console.log('Updated toggle button to LISTEN mode');
+        this.modeButton.classList.add('yours-mode');
+        this.modeButton.title = 'Currently: YOURS MODE (System Audio). Click to switch to MINE MODE (Microphone)';
+        toggleOptions.forEach(option => {
+          if (option.getAttribute('data-mode') === 'yours') {
+            option.classList.add('active');
+          } else {
+            option.classList.remove('active');
+          }
+        });
+        console.log('Updated toggle switch to YOURS mode');
       }
       
-      // Ensure button is visible
-      this.modeButton.style.display = 'inline-block';
+      // Ensure toggle is visible
+      this.modeButton.style.display = 'inline-flex';
       this.modeButton.style.visibility = 'visible';
       this.modeButton.style.opacity = '1';
       
       // Force a reflow to ensure the change is visible
       this.modeButton.offsetHeight;
+      
+      // Re-initialize icons after DOM update
+      setTimeout(() => {
+        if (typeof feather !== 'undefined') {
+          feather.replace();
+        }
+      }, 0);
     } else {
       console.warn('modeButton is null in updateUI');
     }
@@ -238,19 +378,23 @@ class VoiceAssistant {
     if (this.startButton) {
       if (this.isActive) {
         // When active, show Stop button
-        this.startButton.textContent = '⏹ Stop';
-        this.startButton.title = `Stop voice assistant (currently in ${this.mode === 'self' ? 'SELF' : 'LISTEN'} mode)`;
+        this.startButton.innerHTML = '<i data-feather="square" class="icon icon-small"></i> Stop';
+        this.startButton.title = `Stop voice assistant (currently in ${this.mode === 'mine' ? 'MINE' : 'YOURS'} mode)`;
         this.startButton.classList.add('listening');
       } else {
         // When stopped, show Start button with mode icon
-        if (this.mode === 'self') {
-          this.startButton.textContent = '🎤 Start';
-          this.startButton.title = 'Start voice assistant in SELF MODE (Microphone)';
+        if (this.mode === 'mine') {
+          this.startButton.innerHTML = '<i data-feather="mic" class="icon icon-small"></i> Start';
+          this.startButton.title = 'Start voice assistant in MINE MODE (Microphone)';
         } else {
-          this.startButton.textContent = '🔊 Start';
-          this.startButton.title = 'Start voice assistant in LISTEN MODE (System Audio)';
+          this.startButton.innerHTML = '<i data-feather="volume-2" class="icon icon-small"></i> Start';
+          this.startButton.title = 'Start voice assistant in YOURS MODE (System Audio)';
         }
         this.startButton.classList.remove('listening');
+      }
+      // Re-initialize icons
+      if (typeof feather !== 'undefined') {
+        feather.replace();
       }
     }
     
@@ -264,12 +408,19 @@ class VoiceAssistant {
     if (!this.statusIndicator) return;
     
     if (this.isActive) {
+      const iconName = this.mode === 'mine' ? 'mic' : 'volume-2';
       this.statusIndicator.className = 'voice-assistant-status active';
       this.statusIndicator.innerHTML = `
-        <div class="status-mode">${this.mode === 'self' ? '🎤 SELF MODE' : '🔊 LISTEN MODE'}</div>
+        <div class="status-mode">
+          <i data-feather="${iconName}" class="icon icon-small"></i> ${this.mode === 'mine' ? 'MINE MODE' : 'YOURS MODE'}
+        </div>
         <div class="status-text">${this.isProcessing ? 'Processing...' : 'Listening...'}</div>
         ${this.lastTranscription ? `<div class="status-transcript">${this.lastTranscription}</div>` : ''}
       `;
+      // Re-initialize icons
+      if (typeof feather !== 'undefined') {
+        feather.replace();
+      }
     } else {
       this.statusIndicator.className = 'voice-assistant-status';
       this.statusIndicator.innerHTML = '';
@@ -311,10 +462,10 @@ class VoiceAssistant {
       this.audioChunks = []; // Clear any old chunks
       this.updateUI();
       
-      if (this.mode === 'self') {
-        await this.startSelfMode();
+      if (this.mode === 'mine') {
+        await this.startMineMode();
       } else {
-        await this.startListenMode();
+        await this.startYoursMode();
       }
     } catch (error) {
       console.error('Failed to start voice assistant:', error);
@@ -362,9 +513,9 @@ class VoiceAssistant {
   }
   
   /**
-   * Start SELF mode (microphone input ONLY - no system audio)
+   * Start MINE mode (microphone input ONLY - no system audio)
    */
-  async startSelfMode() {
+  async startMineMode() {
     try {
       // Ensure window stays on top and focused before requesting permissions
       await this.ensureWindowOnTop();
@@ -384,14 +535,14 @@ class VoiceAssistant {
       
       // Verify we got microphone tracks only (not system audio)
       const audioTracks = this.audioStream.getAudioTracks();
-      console.log('SELF mode: Audio tracks:', audioTracks.length);
+      console.log('MINE mode: Audio tracks:', audioTracks.length);
       audioTracks.forEach(track => {
-        console.log('SELF mode: Track label:', track.label, 'kind:', track.kind);
+        console.log('MINE mode: Track label:', track.label, 'kind:', track.kind);
         // Ensure it's a microphone track, not desktop audio
         if (track.label.toLowerCase().includes('desktop') || 
             track.label.toLowerCase().includes('screen') ||
             track.label.toLowerCase().includes('system')) {
-          console.warn('SELF mode: Warning - detected system audio track, stopping it');
+          console.warn('MINE mode: Warning - detected system audio track, stopping it');
           track.stop();
         }
       });
@@ -413,27 +564,27 @@ class VoiceAssistant {
         }
       };
       
-      // Start recording in chunks (every 3 seconds)
-      this.mediaRecorder.start(3000);
+      // Start recording in chunks (every 1.5 seconds for lower latency)
+      this.mediaRecorder.start(1500);
       
-      // Process audio chunks every 3 seconds
+      // Process audio chunks every 1.5 seconds for faster response
       this.transcriptionInterval = setInterval(async () => {
         // Only process if we have new chunks since last processing
         if (this.audioChunks.length > this.lastProcessedChunkIndex && !this.isProcessing) {
           await this.processAudioChunk();
         }
-      }, 3000);
+      }, 1500);
       
     } catch (error) {
-      console.error('Failed to start SELF mode:', error);
+      console.error('Failed to start MINE mode:', error);
       throw new Error(`Microphone access denied: ${error.message}`);
     }
   }
   
   /**
-   * Start LISTEN mode (system/speaker audio ONLY - no microphone)
+   * Start YOURS mode (system/speaker audio ONLY - no microphone)
    */
-  async startListenMode() {
+  async startYoursMode() {
     try {
       // Ensure window stays on top and focused
       await this.ensureWindowOnTop();
@@ -457,11 +608,11 @@ class VoiceAssistant {
         
         // Verify we got system audio tracks, not microphone
         const audioTracks = stream.getAudioTracks();
-        console.log('LISTEN mode: Audio tracks:', audioTracks.length);
+        console.log('YOURS mode: Audio tracks:', audioTracks.length);
         
         let hasSystemAudio = false;
         audioTracks.forEach(track => {
-          console.log('LISTEN mode: Track label:', track.label, 'kind:', track.kind);
+          console.log('YOURS mode: Track label:', track.label, 'kind:', track.kind);
           // Check if it's system/desktop audio
           const label = track.label.toLowerCase();
           if (label.includes('desktop') || 
@@ -470,18 +621,18 @@ class VoiceAssistant {
               label.includes('speaker') ||
               label.includes('output')) {
             hasSystemAudio = true;
-            console.log('LISTEN mode: Found system audio track');
+            console.log('YOURS mode: Found system audio track');
           } else if (label.includes('microphone') || 
                      label.includes('mic') ||
                      label.includes('input')) {
-            // This is a microphone track, we don't want it in LISTEN mode
-            console.warn('LISTEN mode: Detected microphone track, stopping it');
+            // This is a microphone track, we don't want it in YOURS mode
+            console.warn('YOURS mode: Detected microphone track, stopping it');
             track.stop();
           }
         });
         
         if (!hasSystemAudio && audioTracks.length > 0) {
-          console.warn('LISTEN mode: No clear system audio detected, but tracks exist');
+          console.warn('YOURS mode: No clear system audio detected, but tracks exist');
         }
         
         this.audioStream = stream;
@@ -492,7 +643,7 @@ class VoiceAssistant {
         const sources = await window.electronAPI.getDesktopSources({ types: ['screen'] });
         
         if (!sources.success || sources.sources.length === 0) {
-          throw new Error('No system audio sources available. LISTEN mode requires system audio capture.');
+          throw new Error('No system audio sources available. YOURS mode requires system audio capture.');
         }
         
         try {
@@ -514,7 +665,7 @@ class VoiceAssistant {
           audioTracks.forEach(track => {
             const label = track.label.toLowerCase();
             if (label.includes('microphone') || label.includes('mic') || label.includes('input')) {
-              console.warn('LISTEN mode: Detected microphone in desktop capture, stopping it');
+              console.warn('YOURS mode: Detected microphone in desktop capture, stopping it');
               track.stop();
             }
           });
@@ -522,8 +673,8 @@ class VoiceAssistant {
           this.audioStream = stream;
         } catch (desktopError) {
           // If both methods fail, show error
-          this.showError('System audio capture not available. LISTEN mode requires system/speaker audio, not microphone. Please set up virtual audio capture or use SELF mode for microphone.');
-          throw new Error('LISTEN mode requires system audio capture. Use SELF mode for microphone input.');
+          this.showError('System audio capture not available. YOURS mode requires system/speaker audio, not microphone. Please set up virtual audio capture or use MINE mode for microphone.');
+          throw new Error('YOURS mode requires system audio capture. Use MINE mode for microphone input.');
         }
       }
       
@@ -532,13 +683,13 @@ class VoiceAssistant {
       finalTracks.forEach(track => {
         const label = track.label.toLowerCase();
         if (label.includes('microphone') || label.includes('mic') || label.includes('input')) {
-          console.error('LISTEN mode: ERROR - microphone track still present, removing');
+          console.error('YOURS mode: ERROR - microphone track still present, removing');
           track.stop();
         }
       });
       
       if (this.audioStream.getAudioTracks().length === 0) {
-        throw new Error('No system audio tracks available. LISTEN mode requires system/speaker audio.');
+        throw new Error('No system audio tracks available. YOURS mode requires system/speaker audio.');
       }
       
       // Create MediaRecorder
@@ -554,19 +705,19 @@ class VoiceAssistant {
         }
       };
       
-      // Start recording in chunks (every 3 seconds)
-      this.mediaRecorder.start(3000);
+      // Start recording in chunks (every 1.5 seconds for lower latency)
+      this.mediaRecorder.start(1500);
       
-      // Process audio chunks every 3 seconds
+      // Process audio chunks every 1.5 seconds for faster response
       this.transcriptionInterval = setInterval(async () => {
         // Only process if we have new chunks since last processing
         if (this.audioChunks.length > this.lastProcessedChunkIndex && !this.isProcessing) {
           await this.processAudioChunk();
         }
-      }, 3000);
+      }, 1500);
       
     } catch (error) {
-      console.error('Failed to start LISTEN mode:', error);
+      console.error('Failed to start YOURS mode:', error);
       throw error;
     }
   }
@@ -580,9 +731,9 @@ class VoiceAssistant {
     
     if (this.isProcessing || newChunks.length === 0) return;
     
-    // Check minimum size (at least 10KB to ensure valid audio)
+    // Check minimum size (at least 5KB to ensure valid audio - reduced for lower latency)
     const totalSize = newChunks.reduce((sum, chunk) => sum + chunk.size, 0);
-    if (totalSize < 10000) {
+    if (totalSize < 5000) {
       // Too small, wait for more data
       return;
     }
@@ -594,8 +745,8 @@ class VoiceAssistant {
       // Combine only the new audio chunks
       const audioBlob = new Blob(newChunks, { type: 'audio/webm' });
       
-      // Verify blob is valid
-      if (audioBlob.size < 10000) {
+      // Verify blob is valid (reduced threshold for lower latency)
+      if (audioBlob.size < 5000) {
         console.warn('Audio blob too small, skipping:', audioBlob.size);
         this.isProcessing = false;
         return;
@@ -618,17 +769,42 @@ class VoiceAssistant {
       if (transcriptionResult.success && transcriptionResult.text) {
         const text = transcriptionResult.text.trim();
         
-        // Check if it's meaningful speech
-        if (this.isMeaningfulSpeech(text)) {
-          this.lastTranscription = text;
+        // Debounce: Check if we recently processed similar transcription
+        const now = Date.now();
+        if (now - this.lastTranscriptionTime < 500) {
+          // Too soon after last transcription, skip to avoid duplicates
+          this.isProcessing = false;
           this.updateStatus();
+          return;
+        }
+        
+        // Check if it's meaningful speech with enhanced filtering
+        if (this.isMeaningfulSpeech(text)) {
+          // Check for duplicate transcriptions
+          const isDuplicate = this.recentTranscriptions.some(prev => {
+            const similarity = this.calculateSimilarity(text, prev);
+            return similarity > 0.8; // 80% similar = likely duplicate
+          });
           
-          if (this.onTranscription) {
-            this.onTranscription(text);
+          if (!isDuplicate) {
+            this.lastTranscription = text;
+            this.lastTranscriptionTime = now;
+            this.recentTranscriptions.push(text);
+            // Keep only last 5 transcriptions for duplicate checking
+            if (this.recentTranscriptions.length > 5) {
+              this.recentTranscriptions.shift();
+            }
+            this.updateStatus();
+            
+            if (this.onTranscription) {
+              this.onTranscription(text);
+            }
+            
+            // Generate AI response immediately
+            await this.generateResponse(text);
+          } else {
+            console.log('Skipping duplicate transcription:', text);
           }
-          
-          // Generate AI response
-          await this.generateResponse(text);
         } else {
           // Noise or non-speech
           this.lastTranscription = 'I heard unclear or non-speech audio.';
@@ -662,16 +838,17 @@ class VoiceAssistant {
   }
   
   /**
-   * Check if text is meaningful speech
+   * Check if text is meaningful speech (enhanced filtering)
    */
   isMeaningfulSpeech(text) {
-    if (!text || text.length < 2) return false;
+    if (!text || text.length < 3) return false;
     
     // Filter out common transcription artifacts
     const noisePatterns = [
       /^[\s\.,!?\-]+$/,  // Only punctuation/whitespace
-      /^(uh|um|ah|er|hmm)+$/i,  // Only filler words
+      /^(uh|um|ah|er|hmm|mm|huh)+$/i,  // Only filler words
       /^[^\w\s]+$/,  // Only special characters
+      /^[a-z]{1,2}$/i,  // Single or double letter (likely noise)
     ];
     
     for (const pattern of noisePatterns) {
@@ -680,25 +857,78 @@ class VoiceAssistant {
       }
     }
     
-    // Check if it has actual words
+    // Check if it has actual words (minimum 2-3 words for meaningful speech)
     const words = text.split(/\s+/).filter(w => w.length > 1);
+    if (words.length < 2) {
+      // Single word - only accept if it's a question word or important word
+      const questionWords = ['what', 'who', 'where', 'when', 'why', 'how', 'which', 'whose'];
+      const importantWords = ['yes', 'no', 'ok', 'okay', 'help', 'stop', 'start'];
+      const lowerText = text.toLowerCase().trim();
+      if (!questionWords.includes(lowerText) && !importantWords.includes(lowerText)) {
+        return false;
+      }
+    }
+    
+    // Filter common transcription errors (e.g., "what is your name" misheard)
+    const commonErrors = [
+      /^[a-z]{1,3}\s+[a-z]{1,3}\s+[a-z]{1,3}$/i,  // Very short words only
+      /^(the|a|an)\s+[a-z]{1,2}$/i,  // Article + very short word
+    ];
+    
+    for (const pattern of commonErrors) {
+      if (pattern.test(text) && words.length < 3) {
+        return false;
+      }
+    }
+    
     return words.length > 0;
   }
   
   /**
-   * Generate AI response
+   * Calculate similarity between two strings (simple Levenshtein-based)
+   */
+  calculateSimilarity(str1, str2) {
+    const longer = str1.length > str2.length ? str1 : str2;
+    const shorter = str1.length > str2.length ? str2 : str1;
+    
+    if (longer.length === 0) return 1.0;
+    
+    // Simple word-based similarity
+    const words1 = str1.toLowerCase().split(/\s+/);
+    const words2 = str2.toLowerCase().split(/\s+/);
+    const commonWords = words1.filter(w => words2.includes(w));
+    const totalWords = new Set([...words1, ...words2]).size;
+    
+    return commonWords.length / totalWords;
+  }
+  
+  /**
+   * Generate AI response (using chat history from ChatUI)
    */
   async generateResponse(userText) {
     try {
-      // Add to conversation history
-      this.conversationHistory.push({
+      // Get messages from ChatUI instead of maintaining separate history
+      let messages = [];
+      if (this.chatUI && this.chatUI.messages) {
+        // Filter out "Thinking..." placeholder and get actual messages
+        messages = this.chatUI.messages
+          .filter(msg => msg.content !== 'Thinking...')
+          .map(msg => ({
+            role: msg.role,
+            content: msg.content
+          }));
+      }
+      
+      // Add current user message
+      messages.push({
         role: 'user',
         content: userText
       });
       
-      // Keep history manageable (last 10 messages)
-      if (this.conversationHistory.length > 20) {
-        this.conversationHistory = this.conversationHistory.slice(-20);
+      // Get chat context if available
+      let chatContext = null;
+      if (this.chatUI && this.chatUI.context) {
+        chatContext = this.chatUI.context;
       }
       
       // Get provider config
@@ -732,24 +962,38 @@ class VoiceAssistant {
         return;
       }
       
-      // Prepare messages with system prompt
-      const systemPrompt = this.mode === 'self' 
+      // Prepare system prompt with context
+      let systemPrompt = this.mode === 'mine' 
         ? 'You are a real-time voice AI assistant. Provide short, clear, conversational responses. Respond naturally as if in a conversation.'
         : 'You are a real-time voice AI assistant listening to system audio. Provide short, clear, helpful responses. If the audio contains questions or meaningful content, answer them conversationally.';
       
-      const messages = [
+      // Prepend context if available
+      if (chatContext) {
+        systemPrompt = `Context: ${chatContext}. ${systemPrompt}`;
+      }
+      
+      // Build messages array with system prompt first
+      const messagesWithSystem = [
         { role: 'system', content: systemPrompt },
-        ...this.conversationHistory
+        ...messages
       ];
+      
+      // Also include context in user message for better awareness
+      if (chatContext && messages.length > 0) {
+        const lastUserMsg = messagesWithSystem[messagesWithSystem.length - 1];
+        if (lastUserMsg.role === 'user') {
+          lastUserMsg.content = `[Context: ${chatContext}] ${lastUserMsg.content}`;
+        }
+      }
       
       // Stream response
       this.responseBuffer = '';
       
-      // Use streaming API
+      // Use streaming API with immediate UI updates
       try {
         await window.electronAPI.sendAIMessageStream(
           providerConfig,
-          messages,
+          messagesWithSystem,
           (chunk) => {
             // Handle error chunks
             if (typeof chunk === 'string' && chunk.startsWith('[ERROR]')) {
@@ -757,19 +1001,15 @@ class VoiceAssistant {
             }
             
             this.responseBuffer += chunk;
+            // Update UI immediately on each chunk for low latency
             if (this.onResponse) {
               this.onResponse(this.responseBuffer, false);
             }
           }
         );
         
-        // Add assistant response to history
+        // Final response
         if (this.responseBuffer) {
-          this.conversationHistory.push({
-            role: 'assistant',
-            content: this.responseBuffer
-          });
-          
           if (this.onResponse) {
             this.onResponse(this.responseBuffer, true);
           }
@@ -819,8 +1059,14 @@ class VoiceAssistant {
     if (this.statusIndicator) {
       this.statusIndicator.className = 'voice-assistant-status error';
       this.statusIndicator.innerHTML = `
-        <div class="status-error">❌ ${message}</div>
+        <div class="status-error">
+          <i data-feather="alert-circle" class="icon icon-small"></i> ${message}
+        </div>
       `;
+      // Re-initialize icons
+      if (typeof feather !== 'undefined') {
+        feather.replace();
+      }
       
       // Clear error after 5 seconds
       setTimeout(() => {
@@ -835,8 +1081,20 @@ class VoiceAssistant {
 
 // Export for use in renderer
 // Make it available globally for script tag loading
+// Always attach to window if it exists (should always exist in browser context)
 if (typeof window !== 'undefined') {
   window.VoiceAssistant = VoiceAssistant;
+  console.log('✅ VoiceAssistant class attached to window.VoiceAssistant');
+} else {
+  // Fallback: try to attach anyway (for edge cases)
+  try {
+    globalThis.VoiceAssistant = VoiceAssistant;
+    globalThis.window = globalThis.window || globalThis;
+    globalThis.window.VoiceAssistant = VoiceAssistant;
+    console.log('✅ VoiceAssistant attached via globalThis fallback');
+  } catch (e) {
+    console.error('❌ Failed to attach VoiceAssistant:', e);
+  }
 }
 
 // Also support CommonJS if needed

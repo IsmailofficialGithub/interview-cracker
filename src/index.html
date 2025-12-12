@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' https:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; webview-src *; frame-src *;">
   <title>Private AI Chat</title>
+  <script src="https://unpkg.com/feather-icons"></script>
   <style>
     * {
       margin: 0;
@@ -36,6 +37,38 @@
       opacity: 0.3;
       pointer-events: none;
     }
+    /* Loading state for voice mode toggle */
+.voice-mode-toggle.loading {
+  opacity: 0.6;
+  pointer-events: none;
+  position: relative;
+}
+
+.voice-mode-toggle.loading::after {
+  content: 'Loading...';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  z-index: 1000;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.toggle-option.loading {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.toggle-option.loading::before {
+  content: '⏳';
+  margin-right: 4px;
+}
     
     /* Header */
     .header {
@@ -361,34 +394,46 @@
       font-weight: 500;
     }
     
-    /* Voice Mode Toggle Button */
-    .voice-mode-toggle {
-      background: #0066cc;
-      border: 2px solid #0052a3;
-      color: #ffffff;
-      padding: 12px 20px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 600;
-      transition: all 0.2s;
-      flex-shrink: 0;
+    /* Icon styles */
+    .icon {
+      width: 16px;
+      height: 16px;
+      stroke-width: 2;
+      vertical-align: middle;
       display: inline-block;
-      min-width: 120px;
-      text-align: center;
+    }
+    
+    .icon-small {
+      width: 14px;
+      height: 14px;
+    }
+    
+    .icon-large {
+      width: 20px;
+      height: 20px;
+    }
+    
+    /* Voice Mode Toggle Switch */
+    .voice-mode-toggle {
+      background: #1a1a1a;
+      border: 2px solid #444;
+      border-radius: 8px;
+      padding: 4px;
+      cursor: pointer;
+      display: inline-flex;
+      flex-shrink: 0;
+      min-width: 180px;
+      position: relative;
+      transition: all 0.2s;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+      user-select: none;
+      pointer-events: auto !important;
+      z-index: 10;
     }
     
     .voice-mode-toggle:hover {
-      background: #0052a3;
-      border-color: #004080;
+      border-color: #555;
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-      transform: translateY(-1px);
-    }
-    
-    .voice-mode-toggle:active {
-      transform: translateY(0) scale(0.98);
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     }
     
     .voice-mode-toggle:focus {
@@ -396,15 +441,65 @@
       outline-offset: 2px;
     }
     
-    /* LISTEN mode styling */
-    .voice-mode-toggle.listen-mode {
-      background: #28a745;
-      border-color: #218838;
+    .toggle-option {
+      flex: 1;
+      padding: 10px 16px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: #999;
+      border-radius: 6px;
+      transition: all 0.2s;
+      user-select: none;
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      pointer-events: auto !important;
     }
     
-    .voice-mode-toggle.listen-mode:hover {
-      background: #218838;
-      border-color: #1e7e34;
+    .toggle-option .icon,
+    .toggle-option svg,
+    .toggle-option i {
+      width: 14px;
+      height: 14px;
+      pointer-events: none;
+    }
+    
+    /* Allow pointer events on the toggle option itself, but not children */
+    .toggle-option *:not(.toggle-option) {
+      pointer-events: none;
+    }
+    
+    .toggle-option.active {
+      background: #0066cc;
+      color: #ffffff;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .voice-mode-toggle.yours-mode .toggle-option[data-mode="yours"] {
+      background: #28a745;
+      color: #ffffff;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .voice-mode-toggle.yours-mode .toggle-option[data-mode="mine"] {
+      background: transparent;
+      color: #999;
+    }
+    
+    .voice-mode-toggle:not(.yours-mode) .toggle-option[data-mode="mine"] {
+      background: #0066cc;
+      color: #ffffff;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .voice-mode-toggle:not(.yours-mode) .toggle-option[data-mode="yours"] {
+      background: transparent;
+      color: #999;
     }
     
     /* Auth Modal */
@@ -518,6 +613,109 @@
     .auth-submit-btn:disabled {
       background: #444;
       cursor: not-allowed;
+    }
+    
+    /* New Chat Modal */
+    .new-chat-modal-overlay {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      background: rgba(0, 0, 0, 0.8) !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      z-index: 1001 !important;
+    }
+    
+    .new-chat-modal-content {
+      background: #252525;
+      border: 1px solid #444;
+      border-radius: 12px;
+      padding: 32px;
+      max-width: 500px;
+      width: 90%;
+    }
+    
+    .new-chat-modal-content h2 {
+      margin-bottom: 8px;
+      font-size: 24px;
+    }
+    
+    .new-chat-modal-description {
+      margin-bottom: 24px;
+      opacity: 0.8;
+      font-size: 14px;
+    }
+    
+    .new-chat-input-group {
+      margin-bottom: 20px;
+    }
+    
+    .new-chat-input-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    .new-chat-input-group input,
+    .new-chat-input-group textarea {
+      width: 100%;
+      background: #1a1a1a;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    
+    .new-chat-input-group textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+    
+    .new-chat-input-group input:focus,
+    .new-chat-input-group textarea:focus {
+      outline: none;
+      border-color: #0066cc;
+    }
+    
+    .new-chat-input-group small {
+      display: block;
+      margin-top: 4px;
+      font-size: 12px;
+      opacity: 0.7;
+    }
+    
+    .new-chat-submit-btn,
+    .new-chat-cancel-btn {
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+    }
+    
+    .new-chat-submit-btn {
+      background: #0066cc;
+      color: white;
+    }
+    
+    .new-chat-submit-btn:hover {
+      background: #0052a3;
+    }
+    
+    .new-chat-cancel-btn {
+      background: #333;
+      color: #e0e0e0;
+      margin-left: 8px;
+    }
+    
+    .new-chat-cancel-btn:hover {
+      background: #3a3a3a;
     }
     
     /* Settings Panel */
@@ -1346,10 +1544,12 @@
       opacity: 0.7;
     }
     
-    .browser-tab-incognito::before {
-      content: '🔒';
+    .browser-tab-incognito-icon {
+      width: 12px;
+      height: 12px;
       margin-right: 4px;
-      font-size: 12px;
+      opacity: 0.7;
+      vertical-align: middle;
     }
     
     .browser-new-tab-btn {
@@ -1429,13 +1629,21 @@
   <div class="header">
     <div class="header-title">Private AI Chat</div>
     <div class="header-controls">
-      <button id="browser-button" class="settings-button" title="Open Browser">🌐 Browser</button>
-      <button id="chats-button" class="settings-button" title="Chats">💬 Chats</button>
+      <button id="browser-button" class="settings-button" title="Open Browser">
+        <i data-feather="globe" class="icon icon-small"></i> Browser
+      </button>
+      <button id="chats-button" class="settings-button" title="Chats">
+        <i data-feather="message-circle" class="icon icon-small"></i> Chats
+      </button>
       <select id="provider-selector" class="provider-selector">
         <option value="">No provider</option>
       </select>
-      <button id="logs-button" class="settings-button" title="View Logs">📋 Logs</button>
-      <button id="settings-button" class="settings-button">⚙ Settings</button>
+      <button id="logs-button" class="settings-button" title="View Logs">
+        <i data-feather="file-text" class="icon icon-small"></i> Logs
+      </button>
+      <button id="settings-button" class="settings-button">
+        <i data-feather="settings" class="icon icon-small"></i> Settings
+      </button>
     </div>
   </div>
   
@@ -1443,7 +1651,9 @@
   <div id="chats-sidebar" class="chats-sidebar" style="display: none;">
     <div class="chats-header">
       <h3>Chats</h3>
-      <button id="chats-close" class="chats-close-btn">×</button>
+      <button id="chats-close" class="chats-close-btn">
+        <i data-feather="x" class="icon"></i>
+      </button>
     </div>
     <div class="chats-actions">
       <button id="new-chat-btn" class="new-chat-btn">+ New Chat</button>
@@ -1453,26 +1663,66 @@
     </div>
   </div>
   
+  <!-- New Chat Modal -->
+  <div id="new-chat-modal" class="new-chat-modal-overlay" style="display: none; visibility: hidden; opacity: 0;" hidden>
+    <div class="new-chat-modal-content">
+      <h2>New Chat</h2>
+      <div class="new-chat-modal-description">Create a new chat conversation. Optionally add context to help the AI understand the conversation better.</div>
+      <form id="new-chat-form">
+        <div class="new-chat-input-group">
+          <label for="new-chat-name">Chat Name (optional)</label>
+          <input type="text" id="new-chat-name" placeholder="e.g., Interview Prep, Resume Review" autocomplete="off">
+          <small>Leave empty to use a default name</small>
+        </div>
+        <div class="new-chat-input-group">
+          <label for="new-chat-context">Context (optional)</label>
+          <textarea id="new-chat-context" placeholder="e.g., This is my resume. Help me answer questions about my experience and skills."></textarea>
+          <small>This context will be included in all AI conversations in this chat</small>
+        </div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 24px;">
+          <button type="button" id="new-chat-cancel" class="new-chat-cancel-btn">Cancel</button>
+          <button type="submit" id="new-chat-submit" class="new-chat-submit-btn">Create Chat</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
   <!-- Main Content Area -->
   <div class="main-content">
   <!-- Browser View -->
   <div id="browser-view" class="browser-view">
     <div class="browser-tabs-container" id="browser-tabs-container">
       <button id="browser-new-tab" class="browser-new-tab-btn" title="New Tab">+</button>
-      <button id="browser-new-incognito-tab" class="browser-new-tab-btn" title="New Incognito Tab">🔒</button>
+      <button id="browser-new-incognito-tab" class="browser-new-tab-btn" title="New Incognito Tab">
+        <i data-feather="lock" class="icon"></i>
+      </button>
       <div class="browser-window-controls">
-        <button id="browser-new-window" class="browser-new-window-btn" title="New Window">🪟 New Window</button>
-        <button id="browser-incognito" class="browser-incognito-btn" title="New Incognito Window">🔒 Incognito</button>
+        <button id="browser-new-window" class="browser-new-window-btn" title="New Window">
+          <i data-feather="square" class="icon icon-small"></i> New Window
+        </button>
+        <button id="browser-incognito" class="browser-incognito-btn" title="New Incognito Window">
+          <i data-feather="lock" class="icon icon-small"></i> Incognito
+        </button>
       </div>
     </div>
     <div class="browser-toolbar">
-      <button id="browser-back" class="browser-nav-btn" title="Back">←</button>
-      <button id="browser-forward" class="browser-nav-btn" title="Forward">→</button>
-      <button id="browser-home" class="browser-nav-btn" title="Home">🏠</button>
+      <button id="browser-back" class="browser-nav-btn" title="Back">
+        <i data-feather="chevron-left" class="icon"></i>
+      </button>
+      <button id="browser-forward" class="browser-nav-btn" title="Forward">
+        <i data-feather="chevron-right" class="icon"></i>
+      </button>
+      <button id="browser-home" class="browser-nav-btn" title="Home">
+        <i data-feather="home" class="icon"></i>
+      </button>
       <input type="text" id="browser-url" class="browser-url-bar" placeholder="Enter URL or search..." value="https://www.google.com">
       <button id="browser-go" class="browser-nav-btn" title="Go">Go</button>
-      <button id="browser-refresh" class="browser-refresh-btn" title="Refresh">↻</button>
-      <button id="browser-close-view" class="browser-close-btn" title="Close Browser">✕</button>
+      <button id="browser-refresh" class="browser-refresh-btn" title="Refresh">
+        <i data-feather="refresh-cw" class="icon"></i>
+      </button>
+      <button id="browser-close-view" class="browser-close-btn" title="Close Browser">
+        <i data-feather="x" class="icon"></i>
+      </button>
     </div>
     <div id="browser-tabs-content">
       <!-- Tabs will be dynamically added here -->
@@ -1483,18 +1733,27 @@
   <div id="chat-container">
     <div id="chat-messages"></div>
     <div id="voice-status" class="voice-status">
-      <div>🎤 Listening...</div>
+      <div>
+        <i data-feather="mic" class="icon icon-small"></i> Listening...
+      </div>
       <div class="voice-text" id="voice-transcript"></div>
     </div>
     <div class="input-area">
-      <button id="voice-mode-toggle" class="voice-mode-toggle" title="Currently: SELF MODE (Microphone). Click to switch to LISTEN MODE (System Audio)">🎤 SELF MODE</button>
+      <div id="voice-mode-toggle" class="voice-mode-toggle" title="Toggle between MINE MODE (Microphone) and YOURS MODE (System Audio)">
+        <span class="toggle-option active" data-mode="mine" onclick="window.handleVoiceModeToggle && window.handleVoiceModeToggle('mine'); return false;">
+          <i data-feather="mic" class="icon"></i> MINE
+        </span>
+        <span class="toggle-option" data-mode="yours" onclick="window.handleVoiceModeToggle && window.handleVoiceModeToggle('yours'); return false;">
+          <i data-feather="volume-2" class="icon"></i> YOURS
+        </span>
+      </div>
       <textarea 
         id="message-input" 
         placeholder="Type your message... (Enter to send, Ctrl+Enter for new line)"
         rows="1"
       ></textarea>
       <button id="listen-button" class="listen-button" title="Start voice assistant">
-         🎤 Start
+        <i data-feather="mic" class="icon icon-small"></i> Start
       </button>
       <button id="send-button">Send</button>
     </div>
@@ -1503,7 +1762,69 @@
   <!-- End Main Content Area -->
   
   <script src="./renderer/ui/voice-assistant.js"></script>
-  <script src="./renderer/renderer-bundle.js"></script>
+ 
+  <!-- Define modal functions immediately so they're available when renderer-bundle.js loads -->
+  <script>
+    // Define modal functions immediately - BEFORE any other scripts
+    window.showNewChatModal = function() {
+      console.log('=== showNewChatModal called ===');
+      const modal = document.getElementById('new-chat-modal');
+      if (!modal) {
+        console.error('ERROR: New chat modal element not found in DOM!');
+        return;
+      }
+      modal.removeAttribute('hidden');
+      modal.style.display = 'flex';
+      modal.style.visibility = 'visible';
+      modal.style.opacity = '1';
+      modal.style.zIndex = '1001';
+      
+      const nameInput = document.getElementById('new-chat-name');
+      if (nameInput) {
+        nameInput.value = '';
+        setTimeout(() => nameInput.focus(), 100);
+      }
+      console.log('Modal shown');
+    };
+    
+    window.hideNewChatModal = function() {
+      console.log('hideNewChatModal called');
+      const modal = document.getElementById('new-chat-modal');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.style.visibility = 'hidden';
+        modal.style.opacity = '0';
+        modal.setAttribute('hidden', 'true');
+        console.log('Modal hidden');
+      }
+    };
+
+    // Initialize Feather icons check
+    function initFeather() {
+      if (typeof feather !== 'undefined') {
+        feather.replace();
+      }
+    }
+  </script>
+
+  <!-- Load Main Application Logic -->
+  <!-- defer ensures it runs after parsing, just in case -->
+  <script src="./renderer/renderer-bundle.js" defer></script>
+  
+  <script>
+    // Final diagnostic to confirm load
+    window.addEventListener('load', () => {
+      console.log('Page fully loaded. Checking status...');
+      setTimeout(() => {
+        if (!window.chatUI && !window.electronAPI) {
+          console.error('CRITICAL: App did not initialize. Check console for "electronAPI not available" or other errors.');
+        } else {
+             console.log('App appears to have loaded. chatUI:', !!window.chatUI);
+             if (typeof feather !== 'undefined') feather.replace();
+        }
+      }, 1000);
+    });
+  </script>
 </body>
 </html>
 

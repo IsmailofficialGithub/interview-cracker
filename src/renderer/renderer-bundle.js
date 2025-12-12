@@ -24,6 +24,7 @@
       this.sendButton = null;
       this.messages = [];
       this.currentChatId = 'default';
+      this.context = null; // Optional context/description for the chat
       this.autoSaveTimer = null;
       this.isBlurred = false;
       
@@ -84,9 +85,26 @@
     }
     
     setupEventListeners() {
-      this.sendButton.addEventListener('click', () => {
+      console.log('ChatUI: Setting up event listeners...');
+      console.log('sendButton:', !!this.sendButton);
+      
+      if (!this.sendButton) {
+        console.error('ChatUI: sendButton is null!');
+        return;
+      }
+      
+      // Remove any existing listeners by cloning
+      const newSendBtn = this.sendButton.cloneNode(true);
+      this.sendButton.parentNode.replaceChild(newSendBtn, this.sendButton);
+      this.sendButton = newSendBtn;
+      
+      this.sendButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Send button clicked');
         this.sendMessage();
       });
+      console.log('✅ Send button listener attached');
       
       this.inputArea.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
@@ -376,11 +394,28 @@
         return;
       }
       
-      this.listenButton.textContent = '🎤 Listen';
+      this.listenButton.innerHTML = '<i data-feather="mic" class="icon icon-small"></i> Listen';
       this.listenButton.title = 'Start voice input with OpenAI Whisper (CTRL+L)';
+      if (typeof feather !== 'undefined') feather.replace();
       
-      // Listen button click - always use real-time listening
-      this.listenButton.addEventListener('click', async () => {
+      // Listen button click - check if VoiceAssistant is handling it first
+      // VoiceAssistant should take priority if it's initialized
+      this.listenButton.addEventListener('click', async (e) => {
+        // Check if VoiceAssistant is handling the button
+        // If VoiceAssistant exists and is initialized, let it handle the click
+        if (window.voiceAssistant && typeof window.voiceAssistant.toggle === 'function') {
+          // VoiceAssistant will handle this, but we still need to check for old system cleanup
+          if (this.isRealTimeListening) {
+            await this.stopRealTimeListening();
+          }
+          if (this.isRecording) {
+            this.stopWhisperRecording();
+          }
+          // Don't start old system, let VoiceAssistant handle it
+          return;
+        }
+        
+        // Fallback to old system if VoiceAssistant not available
         if (this.isRealTimeListening) {
           await this.stopRealTimeListening();
         } else if (this.isRecording) {
@@ -408,7 +443,7 @@
       try {
         // Log: Starting voice recording
         if (window.logsPanel) {
-          window.logsPanel.addLog('info', '🎤 Voice recording started', null, { source: 'VoiceInput', action: 'start_recording' });
+          window.logsPanel.addLog('info', 'Voice recording started', null, { source: 'VoiceInput', action: 'start_recording' });
         }
         
         // Check if voice is enabled
@@ -630,7 +665,7 @@
               const errorMsg = 'Transcription failed: ' + (result.error || 'Unknown error');
               this.showVoiceError(errorMsg);
               if (window.logsPanel) {
-                window.logsPanel.addLog('error', `❌ Transcription failed: ${result.error || 'Unknown error'}`, null, {
+                window.logsPanel.addLog('error', `Transcription failed: ${result.error || 'Unknown error'}`, null, {
                   source: 'VoiceInput',
                   action: 'transcription_error',
                   provider: apiAccount.type,
@@ -645,7 +680,7 @@
             const errorMsg = 'Failed to transcribe: ' + error.message;
             this.showVoiceError(errorMsg);
             if (window.logsPanel) {
-              window.logsPanel.addLog('error', `❌ Transcription exception: ${error.message}`, error.stack, {
+              window.logsPanel.addLog('error', `Transcription exception: ${error.message}`, error.stack, {
                 source: 'VoiceInput',
                 action: 'transcription_exception',
                 error: error.message,
@@ -660,7 +695,7 @@
         this.isRecording = true;
         
         if (window.logsPanel) {
-          window.logsPanel.addLog('success', '🎤 Recording in progress... Speak now!', null, {
+          window.logsPanel.addLog('success', 'Recording in progress... Speak now!', null, {
             source: 'VoiceInput',
             action: 'recording_active',
             timeslice: 1000
@@ -673,9 +708,10 @@
         
         if (this.voiceStatusEl) {
           this.voiceStatusEl.innerHTML = `
-            <div>🎤 Recording...</div>
+            <div><i data-feather="mic" class="icon icon-small"></i> Recording...</div>
             <div class="voice-text" id="voice-transcript">Speak now...</div>
           `;
+          if (typeof feather !== 'undefined') feather.replace();
           this.voiceStatusEl.classList.add('active');
         }
         
@@ -693,19 +729,19 @@
           const errorMsg = 'Microphone permission denied. Please allow microphone access.';
           this.showVoiceError(errorMsg);
           if (window.logsPanel) {
-            window.logsPanel.addLog('error', '❌ Microphone permission denied', error.stack, errorLog);
+            window.logsPanel.addLog('error', 'Microphone permission denied', error.stack, errorLog);
           }
         } else if (error.name === 'NotFoundError') {
           const errorMsg = 'No microphone found. Please connect a microphone.';
           this.showVoiceError(errorMsg);
           if (window.logsPanel) {
-            window.logsPanel.addLog('error', '❌ No microphone found', error.stack, errorLog);
+            window.logsPanel.addLog('error', 'No microphone found', error.stack, errorLog);
           }
         } else {
           const errorMsg = 'Failed to start recording: ' + error.message;
           this.showVoiceError(errorMsg);
           if (window.logsPanel) {
-            window.logsPanel.addLog('error', `❌ Recording start failed: ${error.message}`, error.stack, errorLog);
+            window.logsPanel.addLog('error', `Recording start failed: ${error.message}`, error.stack, errorLog);
           }
         }
       }
@@ -822,7 +858,7 @@
                   flow: 'Voice → Whisper (transcription) → Chat Model (auto-reply)'
                 });
               } else {
-                window.logsPanel.addLog('warn', `⚠️ No chat provider selected. Please select one from the dropdown.`, null, {
+                window.logsPanel.addLog('warn', `No chat provider selected. Please select one from the dropdown.`, null, {
                   source: 'VoiceInput',
                   action: 'no_chat_provider'
                 });
@@ -840,7 +876,7 @@
       }
       
       // Add user message with voice indicator
-      this.addMessage('user', `🎤 ${text}`);
+      this.addMessage('user', text);
       
       // Automatically trigger AI response - this uses the selected chat provider/model (NOT Whisper)
       // Whisper was only used for transcription above, now we send text to chat model for AI response
@@ -1064,14 +1100,15 @@
         // Show status in voice status area
         if (this.voiceStatusEl) {
           this.voiceStatusEl.innerHTML = `
-            <div>🎤 Real-time Listening...</div>
+            <div><i data-feather="mic" class="icon icon-small"></i> Real-time Listening...</div>
             <div class="voice-text" id="voice-transcript">Listening for audio from mic and speakers...</div>
           `;
+          if (typeof feather !== 'undefined') feather.replace();
           this.voiceStatusEl.classList.add('active');
         }
         
         // Show message in chat that real-time listening started
-        this.addMessage('assistant', '🎤 Real-time listening started. Capturing audio from microphone and speakers...');
+        this.addMessage('assistant', 'Real-time listening started. Capturing audio from microphone and speakers...');
         
         // Start real-time chunking
         this.startRealTimeChunking();
@@ -1532,7 +1569,7 @@
       
       try {
         // Display transcribed text as user message in chat (left side)
-        this.addMessage('user', `🎤 ${transcriptionText}`);
+        this.addMessage('user', transcriptionText);
         
         // Add to conversation history as user message
         const userMessage = {
@@ -1905,9 +1942,10 @@
           // Show success message
           if (this.voiceStatusEl) {
             this.voiceStatusEl.innerHTML = `
-              <div style="color: #4caf50;">✓ Switched to ${hasGroq ? 'Groq' : 'OpenAI'} Whisper API</div>
+              <div style="color: #4caf50;"><i data-feather="check" class="icon icon-small"></i> Switched to ${hasGroq ? 'Groq' : 'OpenAI'} Whisper API</div>
               <div class="voice-text" style="color: #999; font-size: 12px;">Click Listen button to try again</div>
             `;
+            if (typeof feather !== 'undefined') feather.replace();
             this.voiceStatusEl.classList.add('active');
             setTimeout(() => {
               if (this.voiceStatusEl) {
@@ -1925,9 +1963,10 @@
       // Show error in voice status area
       if (this.voiceStatusEl) {
         this.voiceStatusEl.innerHTML = `
-          <div style="color: #ff6b6b;">❌ Error</div>
+          <div style="color: #ff6b6b;"><i data-feather="alert-circle" class="icon icon-small"></i> Error</div>
           <div style="color: #ff6b6b; font-size: 12px; margin-top: 8px; white-space: pre-line;">${message}</div>
         `;
+        if (typeof feather !== 'undefined') feather.replace();
         this.voiceStatusEl.classList.add('active', 'error');
         
         // Hide after 8 seconds (longer for important messages)
@@ -1986,8 +2025,21 @@
     }
     
     rerenderMessages() {
+      if (!this.chatContainer) return;
       this.chatContainer.innerHTML = '';
-      this.messages.forEach(msg => this.renderMessage(msg));
+      
+      // Safety check - ensure messages is an array
+      if (!Array.isArray(this.messages)) {
+        console.warn('Messages is not an array in rerenderMessages, resetting');
+        this.messages = [];
+        return;
+      }
+      
+      this.messages.forEach(msg => {
+        if (msg && typeof msg === 'object' && msg.role && msg.content) {
+          this.renderMessage(msg);
+        }
+      });
     }
     
     autoScroll() {
@@ -2012,12 +2064,47 @@
       try {
         const result = await window.electronAPI.loadChat(this.currentChatId);
         if (result.success && result.data) {
-          this.messages = result.data;
+          // Handle both old format (array of messages) and new format (object with messages and context)
+          if (Array.isArray(result.data)) {
+            // Old format - just an array of messages
+            this.messages = Array.isArray(result.data) ? result.data : [];
+            this.context = null;
+          } else if (result.data && typeof result.data === 'object') {
+            // New format - object with messages and context
+            this.messages = Array.isArray(result.data.messages) ? result.data.messages : [];
+            this.context = result.data.context || null;
+          } else {
+            // Invalid data format - reset to empty
+            console.warn('Invalid chat data format, resetting to empty chat');
+            this.messages = [];
+            this.context = null;
+          }
+          
+          // Final safety check - ensure messages is always an array
+          if (!Array.isArray(this.messages)) {
+            console.warn('Messages is not an array, resetting to empty array');
+            this.messages = [];
+          }
+          
+          // Validate each message has required fields
+          this.messages = this.messages.filter(msg => {
+            if (!msg || typeof msg !== 'object') return false;
+            if (!msg.role || !msg.content) return false;
+            return true;
+          });
+          
           this.rerenderMessages();
           this.autoScroll();
+        } else {
+          // No data or failed to load - start with empty chat
+          this.messages = [];
+          this.context = null;
         }
       } catch (error) {
         console.error('Failed to load chat history:', error);
+        // Reset to empty chat on error
+        this.messages = [];
+        this.context = null;
         if (window.logsPanel) {
           window.logsPanel.addLog('error', 'Failed to load chat history: ' + error.message, error.stack);
         }
@@ -2026,12 +2113,57 @@
     
     async saveChatHistory() {
       try {
-        await window.electronAPI.saveChat(this.currentChatId, this.messages);
+        // Save with context if available
+        const chatData = {
+          messages: this.messages,
+          context: this.context || null
+        };
+        await window.electronAPI.saveChat(this.currentChatId, chatData);
       } catch (error) {
         console.error('Failed to save chat history:', error);
         if (window.logsPanel) {
           window.logsPanel.addLog('error', 'Failed to save chat history: ' + error.message, error.stack);
         }
+      }
+    }
+    
+    /**
+     * Set chat context/description
+     * @param {string} context - Context text
+     */
+    setContext(context) {
+      this.context = context || null;
+      this.scheduleAutoSave();
+    }
+    
+    /**
+     * Get chat context
+     * @returns {string|null} Context text
+     */
+    getContext() {
+      return this.context;
+    }
+    
+    /**
+     * Switch to a different chat
+     * @param {string} chatId - Chat ID
+     * @param {string|null} context - Optional context
+     */
+    async switchChat(chatId, context = null) {
+      this.currentChatId = chatId;
+      this.context = context;
+      
+      // Try to load existing chat, but if it doesn't exist, start with empty chat
+      try {
+        await this.loadChatHistory();
+      } catch (error) {
+        // Chat doesn't exist yet, start with empty chat
+        console.log('New chat - starting with empty messages');
+        this.messages = [];
+        this.context = context;
+        // Save the new chat immediately
+        await this.saveChatHistory();
+        this.rerenderMessages();
       }
     }
     
@@ -2182,7 +2314,10 @@
         submitBtn.textContent = this.setupMode ? 'Setup Password' : 'Unlock';
       }
       
-      document.getElementById('password-input').value = '';
+      const passwordInput = document.getElementById('password-input');
+      if (passwordInput) {
+        passwordInput.value = '';
+      }
     }
     
     hide() {
@@ -2225,7 +2360,9 @@
           <div class="settings-panel-content">
             <div class="settings-header">
               <h2>Settings</h2>
-              <button id="settings-close" class="settings-close-btn">×</button>
+              <button id="settings-close" class="settings-close-btn">
+                <i data-feather="x" class="icon"></i>
+              </button>
             </div>
             <div class="settings-body">
               <div class="settings-tabs">
@@ -2382,7 +2519,7 @@
               Enable voice input
             </label>
             <small style="display: block; margin-top: 4px; color: #999; font-size: 12px;">
-              Click the 🎤 Listen button to use voice input
+              Click the Listen button to use voice input
             </small>
           </div>
           <div class="setting-item" style="margin-bottom: 16px;">
@@ -2741,14 +2878,14 @@
       const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
       if (whisperModels.includes(modelValue)) {
         alert(
-          '❌ Error: Whisper models are for audio transcription only, not chat!\n\n' +
-          '📝 For Chat Models:\n' +
+          'Error: Whisper models are for audio transcription only, not chat!\n\n' +
+          'For Chat Models:\n' +
           '   • Groq: Use "llama-3.1-8b-instant" or "llama-3.3-70b-versatile"\n' +
           '   • OpenAI: Use "gpt-4" or "gpt-3.5-turbo"\n\n' +
-          '🎤 For Voice Input:\n' +
+          'For Voice Input:\n' +
           '   • Whisper models are selected in Settings → Privacy → Voice Input\n' +
           '   • They transcribe your voice → then send text to your chat model\n\n' +
-          '💡 How it works:\n' +
+          'How it works:\n' +
           '   1. Voice → Whisper (transcription)\n' +
           '   2. Text → Chat Model (AI response)'
         );
@@ -2951,9 +3088,13 @@
             <div class="logs-header">
               <h2>Application Logs</h2>
               <div class="logs-controls">
-                <button id="logs-copy" class="logs-copy-btn">📋 Copy Logs</button>
+                <button id="logs-copy" class="logs-copy-btn">
+                  <i data-feather="copy" class="icon icon-small"></i> Copy Logs
+                </button>
                 <button id="logs-clear" class="logs-clear-btn">Clear Logs</button>
-                <button id="logs-close" class="logs-close-btn">× Close</button>
+                <button id="logs-close" class="logs-close-btn">
+                  <i data-feather="x" class="icon icon-small"></i> Close
+                </button>
               </div>
             </div>
             <div class="logs-filter">
@@ -3153,10 +3294,12 @@
             // Show feedback
             const copyBtn = document.getElementById('logs-copy');
             if (copyBtn) {
-              const originalText = copyBtn.textContent;
-              copyBtn.textContent = '✓ Copied!';
+              const originalHTML = copyBtn.innerHTML;
+              copyBtn.innerHTML = '<i data-feather="check" class="icon icon-small"></i> Copied!';
+              if (typeof feather !== 'undefined') feather.replace();
               setTimeout(() => {
-                copyBtn.textContent = originalText;
+                copyBtn.innerHTML = originalHTML;
+                if (typeof feather !== 'undefined') feather.replace();
               }, 2000);
             }
             return;
@@ -3184,10 +3327,12 @@
             // Show feedback
             const copyBtn = document.getElementById('logs-copy');
             if (copyBtn) {
-              const originalText = copyBtn.textContent;
-              copyBtn.textContent = '✓ Copied!';
+              const originalHTML = copyBtn.innerHTML;
+              copyBtn.innerHTML = '<i data-feather="check" class="icon icon-small"></i> Copied!';
+              if (typeof feather !== 'undefined') feather.replace();
               setTimeout(() => {
-                copyBtn.textContent = originalText;
+                copyBtn.innerHTML = originalHTML;
+                if (typeof feather !== 'undefined') feather.replace();
               }, 2000);
             }
           } else {
@@ -3225,10 +3370,17 @@
   };
   
   async function loadApplication() {
+    console.log('=== renderer-bundle.js: loadApplication() called ===');
+    
     await loadConfig();
     
+    console.log('Creating ChatUI instance...');
     chatUI = new modules.ChatUI();
     chatUI.initialize();
+    
+    // Expose chatUI globally so it can be accessed by inline handlers
+    window.chatUI = chatUI;
+    console.log('✅ ChatUI initialized and exposed to window.chatUI');
     
     settingsPanel = new modules.SettingsPanel();
     
@@ -3242,18 +3394,48 @@
       logsPanel.addLog(logData.level || 'error', logData.message, logData.stack, logData.details);
     });
     
+    console.log('Setting up button event listeners...');
+    
     const settingsBtn = document.getElementById('settings-button');
+    console.log('settings-button found:', !!settingsBtn);
     if (settingsBtn) {
-      settingsBtn.addEventListener('click', () => {
-        settingsPanel.show();
+      // Remove any existing listeners by cloning
+      const newBtn = settingsBtn.cloneNode(true);
+      settingsBtn.parentNode.replaceChild(newBtn, settingsBtn);
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Settings button clicked');
+        if (settingsPanel && typeof settingsPanel.show === 'function') {
+          settingsPanel.show();
+        } else {
+          console.error('settingsPanel not available');
+        }
       });
+      console.log('✅ Settings button listener attached');
+    } else {
+      console.warn('⚠️ settings-button not found in DOM');
     }
     
     const logsBtn = document.getElementById('logs-button');
+    console.log('logs-button found:', !!logsBtn);
     if (logsBtn) {
-      logsBtn.addEventListener('click', () => {
-        logsPanel.show();
+      // Remove any existing listeners by cloning
+      const newBtn = logsBtn.cloneNode(true);
+      logsBtn.parentNode.replaceChild(newBtn, logsBtn);
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Logs button clicked');
+        if (logsPanel && typeof logsPanel.show === 'function') {
+          logsPanel.show();
+        } else {
+          console.error('logsPanel not available');
+        }
       });
+      console.log('✅ Logs button listener attached');
+    } else {
+      console.warn('⚠️ logs-button not found in DOM');
     }
     
     // Initialize chat sidebar
@@ -3262,14 +3444,24 @@
     const chatsCloseBtn = document.getElementById('chats-close');
     const newChatBtn = document.getElementById('new-chat-btn');
     
+    console.log('chats-button found:', !!chatsButton);
     if (chatsButton && chatsSidebar) {
-      chatsButton.addEventListener('click', () => {
+      // Remove any existing listeners by cloning
+      const newBtn = chatsButton.cloneNode(true);
+      chatsButton.parentNode.replaceChild(newBtn, chatsButton);
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Chats button clicked');
         chatsSidebar.style.display = chatsSidebar.style.display === 'none' ? 'flex' : 'none';
         document.body.classList.toggle('sidebar-open');
         if (chatsSidebar.style.display === 'flex') {
           loadChatsList();
         }
       });
+      console.log('✅ Chats button listener attached');
+    } else {
+      console.warn('⚠️ chats-button or chats-sidebar not found in DOM');
     }
     
     if (chatsCloseBtn && chatsSidebar) {
@@ -3280,11 +3472,48 @@
     }
     
     if (newChatBtn) {
-      newChatBtn.addEventListener('click', () => {
-        createNewChat();
-      });
+      // Remove any existing listeners by cloning
+      const newBtn = newChatBtn.cloneNode(true);
+      newChatBtn.parentNode.replaceChild(newBtn, newChatBtn);
+      
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        console.log('New chat button clicked in renderer-bundle.js');
+        
+        // Try multiple ways to show the modal
+        if (typeof window.showNewChatModal === 'function') {
+          console.log('Calling window.showNewChatModal');
+          window.showNewChatModal();
+        } else {
+          console.warn('window.showNewChatModal not found, trying direct modal access');
+          // Fallback: try to show modal directly
+          const modal = document.getElementById('new-chat-modal');
+          if (modal) {
+            modal.removeAttribute('hidden');
+            modal.style.display = 'flex';
+            modal.style.visibility = 'visible';
+            modal.style.opacity = '1';
+            modal.style.position = 'fixed';
+            modal.style.top = '0';
+            modal.style.left = '0';
+            modal.style.right = '0';
+            modal.style.bottom = '0';
+            modal.style.zIndex = '1001';
+            modal.style.background = 'rgba(0, 0, 0, 0.8)';
+            modal.style.alignItems = 'center';
+            modal.style.justifyContent = 'center';
+            console.log('Modal shown directly');
+          } else {
+            console.error('Modal element not found');
+            // Last resort: use old behavior
+            createNewChat();
+          }
+        }
+        return false;
+      }, true); // Capture phase
     }
-    
     setupProviderSelector();
     
     // Listen for config updates
@@ -3319,7 +3548,7 @@
       const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
       if (providerConfig.model && whisperModels.includes(providerConfig.model)) {
         const errorMsg = `❌ Error: The selected provider "${providerConfig.name}" is configured with Whisper model "${providerConfig.model}"\n\n` +
-          `⚠️ Whisper models are for audio transcription ONLY, not chat!\n\n` +
+          `Whisper models are for audio transcription ONLY, not chat!\n\n` +
           `🔧 Quick Fix:\n` +
           `1. Go to Settings → AI Accounts\n` +
           `2. Edit the account "${providerConfig.name}"\n` +
@@ -3465,6 +3694,24 @@
         }
       }
     });
+    
+    // Initialize voice assistant from renderer.js after everything else is ready
+    if (typeof window.initializeVoiceAssistant === 'function') {
+      console.log('Calling window.initializeVoiceAssistant from renderer-bundle.js');
+      try {
+        await window.initializeVoiceAssistant();
+      } catch (error) {
+        console.error('Failed to initialize voice assistant:', error);
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Failed to initialize voice assistant: ${error.message}`, error.stack, {
+            source: 'VoiceAssistant',
+            action: 'initialization_failed'
+          });
+        }
+      }
+    } else {
+      console.warn('window.initializeVoiceAssistant not found - voice assistant may not work');
+    }
   }
   
   async function loadConfig() {
@@ -4001,7 +4248,10 @@
         browserView.classList.add('active');
       }
       isBrowserOpen = true;
-      if (browserButton) browserButton.textContent = '💬 Chat';
+      if (browserButton) {
+        browserButton.innerHTML = '<i data-feather="message-circle" class="icon icon-small"></i> Chat';
+        if (typeof feather !== 'undefined') feather.replace();
+      }
       
       // Create first tab if none exist
       if (tabs.length === 0) {
@@ -4016,7 +4266,10 @@
         browserView.classList.remove('active');
       }
       isBrowserOpen = false;
-      if (browserButton) browserButton.textContent = '🌐 Browser';
+      if (browserButton) {
+        browserButton.innerHTML = '<i data-feather="globe" class="icon icon-small"></i> Browser';
+        if (typeof feather !== 'undefined') feather.replace();
+      }
     }
     
     function createTab(url = 'https://www.google.com', incognito = false) {
@@ -4036,9 +4289,10 @@
       tabButton.className = 'browser-tab' + (incognito ? ' browser-tab-incognito' : '');
       tabButton.dataset.tabId = tabId;
       tabButton.innerHTML = `
-        <span class="browser-tab-title">${incognito ? '🔒 ' : ''}New Tab</span>
-        <button class="browser-tab-close" title="Close tab">×</button>
+        <span class="browser-tab-title">${incognito ? '<i data-feather="lock" class="icon icon-small"></i> ' : ''}New Tab</span>
+        <button class="browser-tab-close" title="Close tab"><i data-feather="x" class="icon icon-small"></i></button>
       `;
+      if (typeof feather !== 'undefined') feather.replace();
       
       // Insert before new tab button
       if (browserNewTabBtn && browserNewTabBtn.parentNode) {
@@ -4079,19 +4333,48 @@
       // Webview event handlers
       webview.addEventListener('did-start-loading', () => {
         tab.loading = true;
-        tabButton.querySelector('.browser-tab-title').textContent = (incognito ? '🔒 ' : '') + 'Loading...';
-        updateNavigationButtons(tabId);
+        const titleEl = tabButton.querySelector('.browser-tab-title');
+        if (titleEl) {
+          titleEl.innerHTML = (incognito ? '<i data-feather="lock" class="icon icon-small"></i> ' : '') + 'Loading...';
+          if (typeof feather !== 'undefined') feather.replace();
+        }
+        // Don't update navigation buttons on start-loading, webview not ready yet
+        // Disable buttons instead
+        if (browserBack) browserBack.disabled = true;
+        if (browserForward) browserForward.disabled = true;
       });
       
       webview.addEventListener('did-stop-loading', () => {
         tab.loading = false;
-        tab.url = webview.getURL();
+        try {
+          tab.url = webview.getURL();
+        } catch (e) {
+          console.warn('Cannot get webview URL:', e.message);
+        }
         updateTabTitle(tabId);
-        updateNavigationButtons(tabId);
+        // Use setTimeout to ensure webview is fully ready before checking navigation
+        setTimeout(() => {
+          try {
+            updateNavigationButtons(tabId);
+          } catch (e) {
+            console.warn('Error updating navigation buttons:', e.message);
+          }
+        }, 100);
         
         if (activeTabId === tabId && browserUrl) {
           browserUrl.value = tab.url;
         }
+      });
+      
+      // Also listen for dom-ready event to update navigation buttons
+      webview.addEventListener('dom-ready', () => {
+        setTimeout(() => {
+          try {
+            updateNavigationButtons(tabId);
+          } catch (e) {
+            console.warn('Error updating navigation buttons after dom-ready:', e.message);
+          }
+        }, 100);
       });
       
       webview.addEventListener('page-title-updated', (event) => {
@@ -4216,7 +4499,8 @@
         const titleEl = tabButton.querySelector('.browser-tab-title');
         if (titleEl) {
           const displayTitle = tab.title.length > 20 ? tab.title.substring(0, 20) + '...' : tab.title;
-          titleEl.textContent = (tab.incognito ? '🔒 ' : '') + displayTitle;
+          titleEl.innerHTML = (tab.incognito ? '<i data-feather="lock" class="icon icon-small"></i> ' : '') + displayTitle;
+          if (typeof feather !== 'undefined') feather.replace();
         }
       }
     }
@@ -4256,13 +4540,43 @@
       }
       
       const webview = document.getElementById(`webview-${tabId}`);
-      if (!webview) return;
-      
-      if (browserBack) {
-        browserBack.disabled = !webview.canGoBack();
+      if (!webview) {
+        if (browserBack) browserBack.disabled = true;
+        if (browserForward) browserForward.disabled = true;
+        return;
       }
-      if (browserForward) {
-        browserForward.disabled = !webview.canGoForward();
+      
+      // Check if webview is ready before accessing navigation methods
+      try {
+        // Check if webview is attached to DOM and ready
+        if (webview.getWebContentsId && typeof webview.getWebContentsId === 'function') {
+          // Webview is ready, safe to call navigation methods
+          if (browserBack) {
+            try {
+              browserBack.disabled = !webview.canGoBack();
+            } catch (e) {
+              console.warn('Cannot check canGoBack:', e.message);
+              browserBack.disabled = true;
+            }
+          }
+          if (browserForward) {
+            try {
+              browserForward.disabled = !webview.canGoForward();
+            } catch (e) {
+              console.warn('Cannot check canGoForward:', e.message);
+              browserForward.disabled = true;
+            }
+          }
+        } else {
+          // Webview not ready yet, disable buttons
+          if (browserBack) browserBack.disabled = true;
+          if (browserForward) browserForward.disabled = true;
+        }
+      } catch (error) {
+        // Webview not ready, disable navigation buttons
+        console.warn('WebView not ready for navigation:', error.message);
+        if (browserBack) browserBack.disabled = true;
+        if (browserForward) browserForward.disabled = true;
       }
     }
     

@@ -13,7 +13,7 @@ The application now includes a real-time voice AI assistant with two working mod
 - Provides short, clear answers
 - Responds as soon as transcribed text arrives
 
-#### 2. LISTEN MODE (🔊)
+#### 2. LISTEN-SYS MODE (🔊)
 - Audio input comes from system speaker/environment
 - Can capture audio from videos, songs, calls, or other people's voices
 - Transcribes incoming audio and provides helpful responses
@@ -22,7 +22,7 @@ The application now includes a real-time voice AI assistant with two working mod
 
 ## Usage
 
-1. **Toggle Mode**: Click the mode button (🎤 SELF or 🔊 LISTEN) in the input area to switch between modes
+1. **Toggle Mode**: Use the toggle switch (🎤 SELF or 🔊 LISTEN-SYS) in the input area to switch between modes
 2. **Start/Stop**: Click the "Start" button (or use the existing listen button) to start/stop the voice assistant
 3. **View Status**: The status indicator shows current mode, transcription, and processing state
 
@@ -34,7 +34,7 @@ The application now includes a real-time voice AI assistant with two working mod
 
 The assistant automatically uses Groq if available, otherwise falls back to OpenAI.
 
-### System Audio Capture (LISTEN Mode)
+### System Audio Capture (LISTEN-SYS Mode)
 
 **Windows:**
 System audio capture on Windows is complex and may require additional setup:
