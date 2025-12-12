@@ -4533,29 +4533,39 @@
     }
     
     function updateNavigationButtons(tabId) {
-      if (!tabId) {
-        if (browserBack) browserBack.disabled = true;
-        if (browserForward) browserForward.disabled = true;
-        return;
-      }
-      
-      const webview = document.getElementById(`webview-${tabId}`);
-      if (!webview) {
-        if (browserBack) browserBack.disabled = true;
-        if (browserForward) browserForward.disabled = true;
-        return;
-      }
-      
-      // Check if webview is ready before accessing navigation methods
       try {
-        // Check if webview is attached to DOM and ready
-        if (webview.getWebContentsId && typeof webview.getWebContentsId === 'function') {
-          // Webview is ready, safe to call navigation methods
+        if (!tabId) {
+          if (browserBack) browserBack.disabled = true;
+          if (browserForward) browserForward.disabled = true;
+          return;
+        }
+        
+        const webview = document.getElementById(`webview-${tabId}`);
+        if (!webview) {
+          if (browserBack) browserBack.disabled = true;
+          if (browserForward) browserForward.disabled = true;
+          return;
+        }
+        
+        // Robust check for webview readiness
+        // The error "WebView must be attached to the DOM" can be thrown by simple property access
+        // so we wrap everything in try-catch
+        
+        // Try to access webview properties safely
+        let isReady = false;
+        try {
+          // Accessing getWebContentsId might throw if not ready
+          isReady = webview.getWebContentsId && typeof webview.getWebContentsId === 'function';
+        } catch (e) {
+          // Ignore access errors
+          isReady = false;
+        }
+        
+        if (isReady) {
           if (browserBack) {
             try {
               browserBack.disabled = !webview.canGoBack();
             } catch (e) {
-              console.warn('Cannot check canGoBack:', e.message);
               browserBack.disabled = true;
             }
           }
@@ -4563,20 +4573,23 @@
             try {
               browserForward.disabled = !webview.canGoForward();
             } catch (e) {
-              console.warn('Cannot check canGoForward:', e.message);
               browserForward.disabled = true;
             }
           }
         } else {
-          // Webview not ready yet, disable buttons
+          // Not ready
           if (browserBack) browserBack.disabled = true;
           if (browserForward) browserForward.disabled = true;
         }
       } catch (error) {
-        // Webview not ready, disable navigation buttons
-        console.warn('WebView not ready for navigation:', error.message);
-        if (browserBack) browserBack.disabled = true;
-        if (browserForward) browserForward.disabled = true;
+        // Global safety catch
+        console.warn('WebView navigation button update failed:', error.message);
+        try {
+          if (browserBack) browserBack.disabled = true;
+          if (browserForward) browserForward.disabled = true;
+        } catch (e) {
+          // Ignore
+        }
       }
     }
     
