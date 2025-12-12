@@ -4,18 +4,18 @@
  * In production, use webpack/rollup to properly bundle
  */
 
-(function() {
+(function () {
   'use strict';
-  
+
   // Check for electronAPI
   if (typeof window.electronAPI === 'undefined') {
     console.error('electronAPI not available');
     return;
   }
-  
+
   // Simple module system
   const modules = {};
-  
+
   // ChatUI Module
   modules.ChatUI = class ChatUI {
     constructor() {
@@ -27,7 +27,7 @@
       this.context = null; // Optional context/description for the chat
       this.autoSaveTimer = null;
       this.isBlurred = false;
-      
+
       // Real-time listening state
       this.isRealTimeListening = false;
       this.desktopStream = null;
@@ -47,17 +47,17 @@
         aiResponses: 0
       };
     }
-    
+
     initialize() {
       this.chatContainer = document.getElementById('chat-messages');
       this.inputArea = document.getElementById('message-input');
       this.sendButton = document.getElementById('send-button');
-      
+
       // Real-time listening UI elements
       this.realtimePanel = document.getElementById('realtime-transcription-panel');
       this.realtimeTranscriptionEl = document.getElementById('realtime-live-transcription');
       this.realtimeAIResponseEl = document.getElementById('realtime-ai-response');
-      
+
       // Stop button for real-time panel
       const realtimeStopBtn = document.getElementById('realtime-stop-btn');
       if (realtimeStopBtn) {
@@ -65,39 +65,39 @@
           this.stopRealTimeListening();
         });
       }
-      
+
       if (!this.chatContainer || !this.inputArea || !this.sendButton) {
         console.error('Chat UI elements not found');
         return;
       }
-      
+
       this.setupEventListeners();
       this.loadChatHistory();
       this.startAutoSave();
-      
+
       window.electronAPI.onWindowBlur(() => {
         this.handleBlur();
       });
-      
+
       window.electronAPI.onWindowFocus(() => {
         this.handleFocus();
       });
     }
-    
+
     setupEventListeners() {
       console.log('ChatUI: Setting up event listeners...');
       console.log('sendButton:', !!this.sendButton);
-      
+
       if (!this.sendButton) {
         console.error('ChatUI: sendButton is null!');
         return;
       }
-      
+
       // Remove any existing listeners by cloning
       const newSendBtn = this.sendButton.cloneNode(true);
       this.sendButton.parentNode.replaceChild(newSendBtn, this.sendButton);
       this.sendButton = newSendBtn;
-      
+
       this.sendButton.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -105,23 +105,23 @@
         this.sendMessage();
       });
       console.log('✅ Send button listener attached');
-      
+
       this.inputArea.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
           e.preventDefault();
           this.sendMessage();
         }
       });
-      
+
       this.inputArea.addEventListener('input', () => {
         this.inputArea.style.height = 'auto';
         this.inputArea.style.height = `${Math.min(this.inputArea.scrollHeight, 200)}px`;
       });
-      
+
       // Voice input setup
       this.setupVoiceInput();
     }
-    
+
     async setupVoiceInput() {
       this.isListening = false;
       this.recognition = null;
@@ -129,16 +129,16 @@
       this.voiceStatusEl = document.getElementById('voice-status');
       this.voiceTranscriptEl = document.getElementById('voice-transcript');
       this.listenButton = document.getElementById('listen-button');
-      
+
       if (!this.listenButton) return;
-      
+
       // Check user's voice API preference from settings
       try {
         const configResult = await window.electronAPI.getConfig();
         if (configResult.success && configResult.data) {
           const settings = configResult.data.settings || {};
           const voiceAPI = settings.voiceAPI || 'groq-whisper'; // Default to Groq Whisper (more reliable)
-          
+
           if (window.logsPanel) {
             window.logsPanel.addLog('info', `Voice input initialized with API: ${voiceAPI}`, null, {
               source: 'VoiceInput',
@@ -147,7 +147,7 @@
               enabled: settings.voiceEnabled !== false
             });
           }
-          
+
           // Check if voice is enabled
           if (settings.voiceEnabled === false) {
             this.listenButton.disabled = true;
@@ -160,7 +160,7 @@
             }
             return;
           }
-          
+
           // Use the selected API
           if (voiceAPI === 'web-speech') {
             this.setupWebSpeechAPI();
@@ -181,21 +181,21 @@
           });
         }
       }
-      
+
       // Default to Whisper if settings not available
       this.setupWhisperAPI();
     }
-    
+
     setupWebSpeechAPI() {
       // Check if browser supports Web Speech API
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      
+
       if (SpeechRecognition) {
         this.recognition = new SpeechRecognition();
         this.recognition.continuous = true; // Keep listening
         this.recognition.interimResults = true; // Show interim results
         this.recognition.lang = 'en-US'; // Default language
-        
+
         this.recognition.onstart = () => {
           this.isListening = true;
           this.listenButton.textContent = '🛑 Stop';
@@ -204,11 +204,11 @@
             this.voiceStatusEl.classList.add('active');
           }
         };
-        
+
         this.recognition.onresult = (event) => {
           let interimTranscript = '';
           let finalTranscript = '';
-          
+
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
@@ -217,13 +217,13 @@
               interimTranscript += transcript;
             }
           }
-          
+
           this.voiceTranscript = finalTranscript + interimTranscript;
-          
+
           if (this.voiceTranscriptEl) {
             this.voiceTranscriptEl.textContent = this.voiceTranscript || 'Listening...';
           }
-          
+
           // Auto-send when we have final transcript and it's not empty
           if (finalTranscript.trim() && this.isListening) {
             // Small delay to ensure we got the full sentence
@@ -238,45 +238,45 @@
             }, 500);
           }
         };
-        
+
         this.recognition.onerror = (event) => {
           // Don't log to console for network errors (they're common and handled gracefully)
           if (event.error !== 'network' && event.error !== 'no-speech') {
             console.error('Speech recognition error:', event.error);
           }
-          
+
           // Handle different error types
           if (event.error === 'no-speech') {
             // No speech detected, continue listening
             return;
           }
-          
+
           if (event.error === 'network') {
             // Network error - Web Speech API may be blocked or unavailable
             this.stopListening();
-            
+
             // Check if we can use Whisper API as fallback
             this.checkWhisperFallback().then(canUseWhisper => {
               if (canUseWhisper) {
-            this.showVoiceError(
-              'Web Speech API Error:\n' +
-              'Your internet works, but Google\'s Speech API is blocked/unavailable.\n\n' +
-              'This is common with:\n' +
-              '• Corporate firewalls\n' +
-              '• Regional restrictions\n' +
-              '• Network filters\n\n' +
-              'Quick Fix: Go to Settings → Privacy → Voice Input\n' +
-              'Change to "OpenAI Whisper" (uses your OpenAI API)'
-            );
-            
-            // Offer to auto-switch if Whisper is available
-            if (canUseWhisper) {
-              setTimeout(() => {
-                if (confirm('Would you like to automatically switch to OpenAI Whisper API?\n\n(This uses your existing OpenAI API key)')) {
-                  this.switchToWhisperMode();
+                this.showVoiceError(
+                  'Web Speech API Error:\n' +
+                  'Your internet works, but Google\'s Speech API is blocked/unavailable.\n\n' +
+                  'This is common with:\n' +
+                  '• Corporate firewalls\n' +
+                  '• Regional restrictions\n' +
+                  '• Network filters\n\n' +
+                  'Quick Fix: Go to Settings → Privacy → Voice Input\n' +
+                  'Change to "OpenAI Whisper" (uses your OpenAI API)'
+                );
+
+                // Offer to auto-switch if Whisper is available
+                if (canUseWhisper) {
+                  setTimeout(() => {
+                    if (confirm('Would you like to automatically switch to OpenAI Whisper API?\n\n(This uses your existing OpenAI API key)')) {
+                      this.switchToWhisperMode();
+                    }
+                  }, 1000);
                 }
-              }, 1000);
-            }
               } else {
                 this.showVoiceError(
                   'Web Speech API Error: Service may be blocked or unavailable.\n\n' +
@@ -286,7 +286,7 @@
                   'Solution: Switch to Whisper API in Settings → Privacy → Voice Input\n' +
                   'Change to "Groq Whisper" or "OpenAI Whisper"'
                 );
-                
+
                 // Automatically switch to Whisper if available
                 setTimeout(() => {
                   this.checkWhisperFallback().then(canUseWhisper => {
@@ -301,7 +301,7 @@
             });
             return;
           }
-          
+
           if (event.error === 'not-allowed') {
             this.stopListening();
             this.showVoiceError(
@@ -310,7 +310,7 @@
             );
             return;
           }
-          
+
           if (event.error === 'service-not-allowed') {
             this.stopListening();
             this.showVoiceError(
@@ -322,12 +322,12 @@
             );
             return;
           }
-          
+
           // Other errors
           this.stopListening();
           this.showVoiceError('Voice recognition error: ' + event.error);
         };
-        
+
         this.recognition.onend = () => {
           if (this.isListening) {
             // Restart if still supposed to be listening
@@ -339,7 +339,7 @@
             }
           }
         };
-        
+
         // Listen button click
         this.listenButton.addEventListener('click', () => {
           if (this.isListening) {
@@ -348,7 +348,7 @@
             this.startListening();
           }
         });
-        
+
         // Keyboard shortcut CTRL+L
         document.addEventListener('keydown', (e) => {
           if (e.ctrlKey && e.key === 'l' && !e.shiftKey && !e.altKey) {
@@ -377,15 +377,15 @@
         });
       }
     }
-    
+
     setupWhisperAPI() {
       // Whisper API using MediaRecorder to capture audio
       this.mediaRecorder = null;
       this.audioChunks = [];
       this.isRecording = false;
-      
+
       if (!this.listenButton) return;
-      
+
       // Check if MediaRecorder is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         this.listenButton.disabled = true;
@@ -393,11 +393,11 @@
         this.showVoiceError('MediaRecorder API not supported. Please use a modern browser.');
         return;
       }
-      
+
       this.listenButton.innerHTML = '<i data-feather="mic" class="icon icon-small"></i> Listen';
       this.listenButton.title = 'Start voice input with OpenAI Whisper (CTRL+L)';
       if (typeof feather !== 'undefined') feather.replace();
-      
+
       // Listen button click - check if VoiceAssistant is handling it first
       // VoiceAssistant should take priority if it's initialized
       this.listenButton.addEventListener('click', async (e) => {
@@ -414,7 +414,7 @@
           // Don't start old system, let VoiceAssistant handle it
           return;
         }
-        
+
         // Fallback to old system if VoiceAssistant not available
         if (this.isRealTimeListening) {
           await this.stopRealTimeListening();
@@ -425,7 +425,7 @@
           await this.startRealTimeListening();
         }
       });
-      
+
       // Keyboard shortcut CTRL+L
       document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.key === 'l' && !e.shiftKey && !e.altKey) {
@@ -438,14 +438,14 @@
         }
       });
     }
-    
+
     async startWhisperRecording() {
       try {
         // Log: Starting voice recording
         if (window.logsPanel) {
           window.logsPanel.addLog('info', 'Voice recording started', null, { source: 'VoiceInput', action: 'start_recording' });
         }
-        
+
         // Check if voice is enabled
         const configResult = await window.electronAPI.getConfig();
         if (configResult.success && configResult.data) {
@@ -459,29 +459,29 @@
             return;
           }
         }
-        
+
         // Get microphone access
         if (window.logsPanel) {
           window.logsPanel.addLog('info', 'Requesting microphone access...', null, { source: 'VoiceInput', action: 'request_microphone' });
         }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
+
         // Create MediaRecorder
         this.mediaRecorder = new MediaRecorder(stream, {
           mimeType: 'audio/webm;codecs=opus'
         });
-        
+
         if (window.logsPanel) {
-          window.logsPanel.addLog('success', 'Microphone access granted. MediaRecorder created', null, { 
-            source: 'VoiceInput', 
+          window.logsPanel.addLog('success', 'Microphone access granted. MediaRecorder created', null, {
+            source: 'VoiceInput',
             action: 'microphone_granted',
             mimeType: 'audio/webm;codecs=opus'
           });
         }
-        
+
         this.audioChunks = [];
         let totalAudioSize = 0;
-        
+
         this.mediaRecorder.ondataavailable = (event) => {
           if (event.data.size > 0) {
             this.audioChunks.push(event.data);
@@ -498,7 +498,7 @@
             }
           }
         };
-        
+
         this.mediaRecorder.onstop = async () => {
           // Log: Recording stopped
           if (window.logsPanel) {
@@ -509,14 +509,14 @@
               totalSize: totalAudioSize
             });
           }
-          
+
           // Stop all tracks
           stream.getTracks().forEach(track => track.stop());
-          
+
           // Create blob from chunks
           const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
           const audioSize = audioBlob.size;
-          
+
           if (window.logsPanel) {
             window.logsPanel.addLog('info', `Processing audio: ${audioSize} bytes, ${this.audioChunks.length} chunks`, null, {
               source: 'VoiceInput',
@@ -525,11 +525,11 @@
               chunkCount: this.audioChunks.length
             });
           }
-          
+
           // Convert to ArrayBuffer/Uint8Array for IPC (Buffer not available in renderer)
           const arrayBuffer = await audioBlob.arrayBuffer();
           const uint8Array = new Uint8Array(arrayBuffer);
-          
+
           if (window.logsPanel) {
             window.logsPanel.addLog('info', `Audio converted to Uint8Array (${uint8Array.length} bytes)`, null, {
               source: 'VoiceInput',
@@ -537,16 +537,16 @@
               arrayLength: uint8Array.length
             });
           }
-          
+
           // Get OpenAI API key
           const configResult = await window.electronAPI.getConfig();
           if (!configResult.success || !configResult.data) {
             this.showVoiceError('Failed to load configuration.');
             return;
           }
-          
+
           const accounts = configResult.data.accounts || [];
-          
+
           // Find account with Whisper support (OpenAI or Groq)
           // For Groq, any account can be used for Whisper (it's separate endpoint)
           let apiAccount = accounts.find(acc => {
@@ -559,7 +559,7 @@
             }
             return false;
           });
-          
+
           if (!apiAccount || !apiAccount.apiKey) {
             const errorMsg = 'No API key found for Whisper transcription.';
             this.showVoiceError(
@@ -577,7 +577,7 @@
             }
             return;
           }
-          
+
           if (window.logsPanel) {
             window.logsPanel.addLog('info', `Found API account: ${apiAccount.type} (${apiAccount.name || 'Unnamed'})`, null, {
               source: 'VoiceInput',
@@ -586,7 +586,7 @@
               accountName: apiAccount.name
             });
           }
-          
+
           // Show processing status
           if (this.voiceStatusEl) {
             this.voiceStatusEl.innerHTML = `
@@ -595,14 +595,14 @@
             `;
             this.voiceStatusEl.classList.add('active');
           }
-          
+
           // Send to Whisper API via IPC
           try {
             // Get Whisper model from settings
             const configForModel = await window.electronAPI.getConfig();
             const settingsForModel = configForModel.success && configForModel.data ? (configForModel.data.settings || {}) : {};
             let whisperModel = settingsForModel.whisperModel;
-            
+
             // Default models if not set in settings
             if (!whisperModel) {
               if (apiAccount.type === 'groq') {
@@ -611,7 +611,7 @@
                 whisperModel = 'whisper-1';
               }
             }
-            
+
             if (window.logsPanel) {
               window.logsPanel.addLog('info', `Sending audio to ${apiAccount.type} Whisper API (model: ${whisperModel})`, null, {
                 source: 'VoiceInput',
@@ -621,7 +621,7 @@
                 audioSize: uint8Array.length
               });
             }
-            
+
             const transcriptionStartTime = Date.now();
             const result = await window.electronAPI.transcribeAudio(
               uint8Array,
@@ -630,10 +630,10 @@
               whisperModel
             );
             const transcriptionDuration = Date.now() - transcriptionStartTime;
-            
+
             if (result.success && result.text) {
               const transcribedText = result.text.trim();
-              
+
               if (window.logsPanel) {
                 window.logsPanel.addLog('success', `✅ Transcription successful (${transcriptionDuration}ms): "${transcribedText.substring(0, 50)}${transcribedText.length > 50 ? '...' : ''}"`, null, {
                   source: 'VoiceInput',
@@ -645,12 +645,12 @@
                   transcribedText: transcribedText
                 });
               }
-              
+
               // Clear status
               if (this.voiceStatusEl) {
                 this.voiceStatusEl.classList.remove('active');
               }
-              
+
               // Send transcribed text to AI
               if (window.logsPanel) {
                 window.logsPanel.addLog('info', `Sending transcribed text to AI chat`, null, {
@@ -659,7 +659,7 @@
                   textLength: transcribedText.length
                 });
               }
-              
+
               this.sendVoiceMessage(transcribedText);
             } else {
               const errorMsg = 'Transcription failed: ' + (result.error || 'Unknown error');
@@ -689,11 +689,11 @@
             }
           }
         };
-        
+
         // Start recording
         this.mediaRecorder.start(1000); // Collect data every second
         this.isRecording = true;
-        
+
         if (window.logsPanel) {
           window.logsPanel.addLog('success', 'Recording in progress... Speak now!', null, {
             source: 'VoiceInput',
@@ -701,11 +701,11 @@
             timeslice: 1000
           });
         }
-        
+
         // Update UI
         this.listenButton.textContent = '🛑 Stop';
         this.listenButton.classList.add('listening');
-        
+
         if (this.voiceStatusEl) {
           this.voiceStatusEl.innerHTML = `
             <div><i data-feather="mic" class="icon icon-small"></i> Recording...</div>
@@ -714,17 +714,17 @@
           if (typeof feather !== 'undefined') feather.replace();
           this.voiceStatusEl.classList.add('active');
         }
-        
+
       } catch (error) {
         console.error('Failed to start recording:', error);
-        
+
         let errorLog = {
           source: 'VoiceInput',
           action: 'recording_start_error',
           errorName: error.name,
           errorMessage: error.message
         };
-        
+
         if (error.name === 'NotAllowedError') {
           const errorMsg = 'Microphone permission denied. Please allow microphone access.';
           this.showVoiceError(errorMsg);
@@ -746,28 +746,28 @@
         }
       }
     }
-    
+
     stopWhisperRecording() {
       if (this.mediaRecorder && this.isRecording) {
         this.mediaRecorder.stop();
         this.isRecording = false;
-        
+
         // Update UI
         this.listenButton.textContent = '🎤 Listen';
         this.listenButton.classList.remove('listening');
       }
     }
-    
+
     async startListening() {
       if (!this.recognition) {
         this.showVoiceError('Voice recognition not available. Please check your browser support.');
         return;
       }
-      
+
       if (this.isListening) {
         return; // Already listening
       }
-      
+
       // Check if voice is enabled in settings
       try {
         const configResult = await window.electronAPI.getConfig();
@@ -781,7 +781,7 @@
       } catch (e) {
         // Continue if config check fails
       }
-      
+
       this.voiceTranscript = '';
       try {
         this.recognition.start();
@@ -800,7 +800,7 @@
         }
       }
     }
-    
+
     stopListening() {
       if (this.recognition && this.isListening) {
         this.isListening = false;
@@ -819,7 +819,7 @@
         }
       }
     }
-    
+
     async sendVoiceMessage(text) {
       if (!text || !text.trim()) {
         if (window.logsPanel) {
@@ -830,7 +830,7 @@
         }
         return;
       }
-      
+
       if (window.logsPanel) {
         window.logsPanel.addLog('info', `✅ Voice transcription complete: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`, null, {
           source: 'VoiceInput',
@@ -838,7 +838,7 @@
           textLength: text.length
         });
       }
-      
+
       // Log which chat provider/model will be used (NOT Whisper - Whisper is only for transcription)
       if (window.logsPanel) {
         try {
@@ -874,10 +874,10 @@
           // Ignore errors in logging
         }
       }
-      
+
       // Add user message with voice indicator
       this.addMessage('user', text);
-      
+
       // Automatically trigger AI response - this uses the selected chat provider/model (NOT Whisper)
       // Whisper was only used for transcription above, now we send text to chat model for AI response
       if (window.logsPanel) {
@@ -887,15 +887,15 @@
           textLength: text.length
         });
       }
-      
+
       // Dispatch event to trigger AI response automatically
       window.dispatchEvent(new CustomEvent('chat-send-message', {
         detail: { content: text }
       }));
     }
-    
+
     // Real-time Listening Methods
-    
+
     async getDesktopAudioStream() {
       try {
         // Try getDisplayMedia first (works in Electron)
@@ -906,7 +906,7 @@
               action: 'request_desktop_capture'
             });
           }
-          
+
           const stream = await navigator.mediaDevices.getDisplayMedia({
             audio: {
               echoCancellation: false,
@@ -916,7 +916,7 @@
             },
             video: true // Required even if we only want audio
           });
-          
+
           // Check if stream has audio tracks
           const audioTracks = stream.getAudioTracks();
           if (audioTracks.length > 0) {
@@ -952,18 +952,18 @@
         throw error;
       }
     }
-    
+
     mergeAudioStreams(desktopStream, micStream) {
       try {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        
+
         const desktopSource = this.audioContext.createMediaStreamSource(desktopStream);
         const micSource = this.audioContext.createMediaStreamSource(micStream);
         const destination = this.audioContext.createMediaStreamDestination();
-        
+
         desktopSource.connect(destination);
         micSource.connect(destination);
-        
+
         if (window.logsPanel) {
           window.logsPanel.addLog('success', 'Audio streams merged successfully', null, {
             source: 'RealTimeListening',
@@ -973,7 +973,7 @@
             mergedTracks: destination.stream.getAudioTracks().length
           });
         }
-        
+
         return destination.stream;
       } catch (error) {
         if (window.logsPanel) {
@@ -986,7 +986,7 @@
         throw error;
       }
     }
-    
+
     async startRealTimeListening() {
       if (this.isRealTimeListening) {
         if (window.logsPanel) {
@@ -997,7 +997,7 @@
         }
         return;
       }
-      
+
       try {
         if (window.logsPanel) {
           window.logsPanel.addLog('info', '🚀 Starting real-time listening...', null, {
@@ -1005,7 +1005,7 @@
             action: 'start_listening'
           });
         }
-        
+
         // Check voice enabled
         const configResult = await window.electronAPI.getConfig();
         if (configResult.success && configResult.data) {
@@ -1015,7 +1015,7 @@
             return;
           }
         }
-        
+
         // Get microphone stream
         if (window.logsPanel) {
           window.logsPanel.addLog('info', 'Requesting microphone access...', null, {
@@ -1024,11 +1024,11 @@
           });
         }
         this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
+
         // Get desktop audio stream
         try {
           this.desktopStream = await this.getDesktopAudioStream();
-          
+
           // Handle stream stop event (user can stop sharing)
           if (this.desktopStream) {
             this.desktopStream.getTracks().forEach(track => {
@@ -1073,7 +1073,7 @@
           // Continue with mic only
           this.desktopStream = null;
         }
-        
+
         // Merge streams if both available
         if (this.desktopStream && this.micStream) {
           this.mergedStream = this.mergeAudioStreams(this.desktopStream, this.micStream);
@@ -1082,7 +1082,7 @@
         } else {
           throw new Error('No audio streams available');
         }
-        
+
         // Initialize conversation state
         this.conversationHistory = [];
         this.transcriptionAccumulator = '';
@@ -1096,7 +1096,7 @@
           aiResponses: 0
         };
         this.updateRealtimeStats();
-        
+
         // Show status in voice status area
         if (this.voiceStatusEl) {
           this.voiceStatusEl.innerHTML = `
@@ -1106,20 +1106,20 @@
           if (typeof feather !== 'undefined') feather.replace();
           this.voiceStatusEl.classList.add('active');
         }
-        
+
         // Show message in chat that real-time listening started
         this.addMessage('assistant', 'Real-time listening started. Capturing audio from microphone and speakers...');
-        
+
         // Start real-time chunking
         this.startRealTimeChunking();
-        
+
         this.isRealTimeListening = true;
-        
+
         if (this.listenButton) {
           this.listenButton.textContent = '🛑 Stop Listening';
           this.listenButton.classList.add('listening');
         }
-        
+
         // Update menu buttons if visible
         document.querySelectorAll('.menu-button').forEach(btn => {
           if (btn.textContent.includes('Listen') || btn.id?.includes('listen')) {
@@ -1127,7 +1127,7 @@
             btn.classList.add('active');
           }
         });
-        
+
         if (window.logsPanel) {
           window.logsPanel.addLog('success', '✅ Real-time listening started successfully', null, {
             source: 'RealTimeListening',
@@ -1136,7 +1136,7 @@
             hasMicAudio: !!this.micStream
           });
         }
-        
+
       } catch (error) {
         if (window.logsPanel) {
           window.logsPanel.addLog('error', `Failed to start real-time listening: ${error.message}`, error.stack, {
@@ -1146,7 +1146,7 @@
             errorName: error.name
           });
         }
-        
+
         let errorMsg = 'Failed to start listening: ' + error.message;
         if (error.name === 'NotAllowedError') {
           errorMsg = 'Microphone permission denied. Please allow microphone access in your browser settings.';
@@ -1155,21 +1155,21 @@
         } else if (error.name === 'NotReadableError') {
           errorMsg = 'Microphone is being used by another application. Please close other apps using the microphone.';
         }
-        
+
         this.showVoiceError(errorMsg);
         await this.cleanupRealTimeListening();
       }
     }
-    
+
     startRealTimeChunking() {
       if (!this.mergedStream) {
         throw new Error('No audio stream available for chunking');
       }
-      
+
       // Use a recursive function to record, stop, process, and restart
       // This ensures each blob is a complete, valid WebM file
       this.recordNextChunk();
-      
+
       if (window.logsPanel) {
         window.logsPanel.addLog('info', 'Real-time audio chunking started (2s intervals)', null, {
           source: 'RealTimeListening',
@@ -1178,7 +1178,7 @@
         });
       }
     }
-    
+
     async recordNextChunk() {
       // Stop if listening was stopped
       if (!this.isRealTimeListening || !this.mergedStream) {
@@ -1192,7 +1192,7 @@
         }
         return;
       }
-      
+
       try {
         // Create a new MediaRecorder for each chunk to ensure complete files
         // Try preferred mimeType first, fallback to default
@@ -1208,13 +1208,13 @@
             mimeType = '';
           }
         }
-        
+
         this.realTimeMediaRecorder = new MediaRecorder(this.mergedStream, mimeType ? { mimeType } : {});
-        
+
         const chunkId = `chunk-${Date.now()}-${++this.chunkCounter}`;
         let chunkBlob = null;
         let dataResolved = false;
-        
+
         // Wait for data to be available with timeout
         const dataPromise = new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
@@ -1223,7 +1223,7 @@
               reject(new Error('Timeout waiting for audio data'));
             }
           }, 3000); // 3 second timeout
-          
+
           this.realTimeMediaRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
               chunkBlob = event.data;
@@ -1234,7 +1234,7 @@
               }
             }
           };
-          
+
           // Also listen for stop event as backup
           this.realTimeMediaRecorder.onstop = () => {
             // If we haven't received data yet, try to resolve anyway
@@ -1253,7 +1253,7 @@
               }, 100);
             }
           };
-          
+
           this.realTimeMediaRecorder.onerror = (event) => {
             if (!dataResolved) {
               dataResolved = true;
@@ -1262,36 +1262,36 @@
             }
           };
         });
-        
+
         // Start recording
         this.realTimeMediaRecorder.start();
-        
+
         // Wait for recorder to actually start (should be immediate, but just in case)
         let startWaitTime = 0;
         while (this.realTimeMediaRecorder.state === 'inactive' && startWaitTime < 500) {
           await new Promise(resolve => setTimeout(resolve, 50));
           startWaitTime += 50;
         }
-        
+
         if (this.realTimeMediaRecorder.state !== 'recording') {
           throw new Error(`MediaRecorder failed to start. State: ${this.realTimeMediaRecorder.state}`);
         }
-        
+
         // Record for 2 seconds
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
+
         // Request data before stopping to ensure we get the chunk
         if (this.realTimeMediaRecorder && this.realTimeMediaRecorder.state === 'recording') {
           this.realTimeMediaRecorder.requestData();
           // Small delay to let requestData process
           await new Promise(resolve => setTimeout(resolve, 50));
         }
-        
+
         // Stop the recorder
         if (this.realTimeMediaRecorder && this.realTimeMediaRecorder.state !== 'inactive') {
           this.realTimeMediaRecorder.stop();
         }
-        
+
         // Wait for the data to be available (with timeout)
         try {
           await dataPromise;
@@ -1306,7 +1306,7 @@
           }
           // Continue to next chunk even if this one failed
         }
-        
+
         // Process the chunk if we got valid data
         if (chunkBlob && chunkBlob.size > 0 && this.isRealTimeListening) {
           if (!this.realtimeStats) {
@@ -1314,7 +1314,7 @@
           }
           this.realtimeStats.chunks++;
           this.updateRealtimeStats();
-          
+
           if (window.logsPanel) {
             window.logsPanel.addLog('info', `Audio chunk received (${chunkBlob.size} bytes, ID: ${chunkId})`, null, {
               source: 'RealTimeListening',
@@ -1324,7 +1324,7 @@
               chunkNumber: this.chunkCounter
             });
           }
-          
+
           // Process chunk asynchronously (don't await to allow next recording to start)
           this.processAudioChunk(chunkBlob, chunkId).catch(error => {
             if (window.logsPanel) {
@@ -1366,7 +1366,7 @@
           }
           this.realTimeMediaRecorder = null;
         }
-        
+
         // Schedule next chunk recording
         if (this.isRealTimeListening) {
           // Small delay before next recording to avoid overlap
@@ -1376,7 +1376,7 @@
         }
       }
     }
-    
+
     async processAudioChunk(audioBlob, chunkId) {
       try {
         // Limit concurrent transcriptions (max 3)
@@ -1391,21 +1391,21 @@
           }
           return;
         }
-        
+
         // Convert blob to Uint8Array
         const arrayBuffer = await audioBlob.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
-        
+
         // Get API account
         const configResult = await window.electronAPI.getConfig();
         if (!configResult.success || !configResult.data) {
           throw new Error('Failed to load configuration');
         }
-        
+
         const accounts = configResult.data.accounts || [];
         const settings = configResult.data.settings || {};
         const preferredVoiceAPI = settings.voiceAPI || 'groq-whisper';
-        
+
         let apiAccount = accounts.find(acc => {
           if (preferredVoiceAPI === 'openai-whisper' && acc.type === 'openai' && acc.apiKey && acc.apiKey.trim() !== '') {
             return true;
@@ -1417,11 +1417,11 @@
           if (acc.type === 'groq' && acc.apiKey && acc.apiKey.trim() !== '') return true;
           return false;
         });
-        
+
         if (!apiAccount || !apiAccount.apiKey) {
           throw new Error('No API key found for transcription');
         }
-        
+
         // Get Whisper model
         let whisperModel = settings.whisperModel;
         if (!whisperModel) {
@@ -1431,7 +1431,7 @@
             whisperModel = 'whisper-1';
           }
         }
-        
+
         // Create transcription promise
         const transcriptionPromise = window.electronAPI.transcribeAudio(
           uint8Array,
@@ -1439,16 +1439,16 @@
           apiAccount.type || 'openai',
           whisperModel
         );
-        
+
         this.activeTranscriptions.set(chunkId, transcriptionPromise);
-        
+
         const result = await transcriptionPromise;
-        
+
         this.activeTranscriptions.delete(chunkId);
-        
+
         if (result.success && result.text) {
           const transcriptionText = result.text.trim();
-          
+
           if (transcriptionText && transcriptionText.length > 0) {
             if (window.logsPanel) {
               window.logsPanel.addLog('success', `✅ Transcription (${chunkId}): "${transcriptionText.substring(0, 50)}..."`, null, {
@@ -1459,7 +1459,7 @@
                 preview: transcriptionText.substring(0, 50)
               });
             }
-            
+
             // Update transcription accumulator
             this.transcriptionAccumulator += (this.transcriptionAccumulator ? ' ' : '') + transcriptionText;
             this.lastTranscriptionTime = Date.now();
@@ -1468,10 +1468,10 @@
             }
             this.realtimeStats.transcriptions++;
             this.updateRealtimeStats();
-            
+
             // Display live transcription preview
             this.updateLiveTranscription(this.transcriptionAccumulator);
-            
+
             // Send to AI immediately
             await this.processTranscriptionChunk(transcriptionText, chunkId);
           }
@@ -1486,7 +1486,7 @@
               error: errorMsg
             });
           }
-          
+
           // If it's a network error, log but continue (don't stop listening)
           if (errorMsg.includes('network') || errorMsg.includes('timeout')) {
             // Network errors are recoverable, continue listening
@@ -1500,18 +1500,18 @@
         }
       } catch (error) {
         this.activeTranscriptions.delete(chunkId);
-        
+
         // Determine if error is recoverable
-        const isRecoverable = error.message.includes('network') || 
-                             error.message.includes('timeout') ||
-                             error.message.includes('ECONNRESET') ||
-                             error.message.includes('ETIMEDOUT');
-        
+        const isRecoverable = error.message.includes('network') ||
+          error.message.includes('timeout') ||
+          error.message.includes('ECONNRESET') ||
+          error.message.includes('ETIMEDOUT');
+
         if (window.logsPanel) {
           window.logsPanel.addLog(
             isRecoverable ? 'warn' : 'error',
-            `Error processing audio chunk (${chunkId}): ${error.message}`, 
-            error.stack, 
+            `Error processing audio chunk (${chunkId}): ${error.message}`,
+            error.stack,
             {
               source: 'RealTimeListening',
               action: 'chunk_error',
@@ -1522,7 +1522,7 @@
             }
           );
         }
-        
+
         // For recoverable errors, don't stop listening
         if (!isRecoverable && !this.isRealTimeListening) {
           // Non-recoverable error and listening stopped, show error
@@ -1532,15 +1532,15 @@
         }
       }
     }
-    
+
     updateLiveTranscription(text) {
       // Update voice status display with live transcription preview
       if (this.voiceStatusEl) {
-        const transcriptEl = this.voiceStatusEl.querySelector('#voice-transcript') || 
-                           this.voiceStatusEl.querySelector('.voice-text');
+        const transcriptEl = this.voiceStatusEl.querySelector('#voice-transcript') ||
+          this.voiceStatusEl.querySelector('.voice-text');
         if (transcriptEl) {
           // Show preview of what's being transcribed (last 100 chars)
-          const preview = text && text.length > 100 
+          const preview = text && text.length > 100
             ? '...' + text.substring(text.length - 100)
             : text || 'Listening...';
           transcriptEl.textContent = preview;
@@ -1548,7 +1548,7 @@
         this.voiceStatusEl.classList.add('active');
       }
     }
-    
+
     updateRealtimeStats() {
       if (!this.realtimeStats) {
         this.realtimeStats = { chunks: 0, transcriptions: 0, aiResponses: 0 };
@@ -1556,21 +1556,21 @@
       const chunkCountEl = document.getElementById('realtime-chunk-count');
       const transcriptionCountEl = document.getElementById('realtime-transcription-count');
       const aiCountEl = document.getElementById('realtime-ai-count');
-      
+
       if (chunkCountEl) chunkCountEl.textContent = this.realtimeStats.chunks;
       if (transcriptionCountEl) transcriptionCountEl.textContent = this.realtimeStats.transcriptions;
       if (aiCountEl) aiCountEl.textContent = this.realtimeStats.aiResponses;
     }
-    
+
     async processTranscriptionChunk(transcriptionText, chunkId) {
       if (!transcriptionText || !transcriptionText.trim()) {
         return;
       }
-      
+
       try {
         // Display transcribed text as user message in chat (left side)
         this.addMessage('user', transcriptionText);
-        
+
         // Add to conversation history as user message
         const userMessage = {
           role: 'user',
@@ -1578,14 +1578,14 @@
           timestamp: Date.now(),
           chunkId: chunkId
         };
-        
+
         this.conversationHistory.push(userMessage);
-        
+
         // Limit conversation history (keep last 20 messages)
         if (this.conversationHistory.length > 20) {
           this.conversationHistory = this.conversationHistory.slice(-20);
         }
-        
+
         // Check for AI provider - need to get config
         const configResult = await window.electronAPI.getConfig();
         if (!configResult.success || !configResult.data) {
@@ -1597,7 +1597,7 @@
           }
           return;
         }
-        
+
         const currentConfig = configResult.data;
         if (!window.currentProviderId || !currentConfig || !currentConfig.accounts) {
           if (window.logsPanel) {
@@ -1608,33 +1608,33 @@
           }
           return;
         }
-        
+
         const providerConfig = currentConfig.accounts.find(acc => acc.name === window.currentProviderId);
         if (!providerConfig) {
           return;
         }
-        
+
         // Cancel previous AI request if new chunk arrives (for real-time, we want latest)
         if (this.activeAIRequests.size > 0) {
           // For now, we'll queue requests instead of canceling
           // Could implement cancellation if needed
         }
-        
+
         // Prepare messages for AI
         const messages = this.conversationHistory.map(msg => ({
           role: msg.role,
           content: String(msg.content || '')
         }));
-        
+
         // Create AI request
         const requestId = `ai-${Date.now()}-${chunkId}`;
         const aiRequestPromise = (async () => {
           // Add thinking indicator
           this.addMessage('assistant', '🤔 Thinking...');
-          
+
           const loadingIndex = this.messages.length - 1;
           let fullContent = '';
-          
+
           try {
             const result = await window.electronAPI.sendAIMessageStream(
               providerConfig,
@@ -1648,7 +1648,7 @@
                 }
               }
             );
-            
+
             if (result.success && result.content) {
               // Message already updated by streaming
               if (window.logsPanel) {
@@ -1659,7 +1659,7 @@
                   responseLength: result.content.length
                 });
               }
-              
+
               // Add to conversation history
               this.conversationHistory.push({
                 role: 'assistant',
@@ -1667,14 +1667,14 @@
                 timestamp: Date.now(),
                 requestId: requestId
               });
-              
+
               // Update stats
               if (!this.realtimeStats) {
                 this.realtimeStats = { chunks: 0, transcriptions: 0, aiResponses: 0 };
               }
               this.realtimeStats.aiResponses++;
               this.updateRealtimeStats();
-              
+
               // Final update to ensure message is correct
               if (this.messages[loadingIndex] && this.messages[loadingIndex].content !== result.content) {
                 this.messages[loadingIndex].content = result.content;
@@ -1694,8 +1694,8 @@
               this.messages[loadingIndex].content = `Error: ${errorMsg}`;
               this.rerenderMessages();
             }
-            
-            
+
+
             if (window.logsPanel) {
               window.logsPanel.addLog('error', `AI request failed for chunk ${chunkId}: ${error.message}`, error.stack, {
                 source: 'RealTimeListening',
@@ -1704,19 +1704,19 @@
                 error: error.message
               });
             }
-            
+
             // Don't throw - continue listening even if AI request fails
             // throw error;
           }
         })();
-        
+
         this.activeAIRequests.set(requestId, aiRequestPromise);
-        
+
         // Clean up when done
         aiRequestPromise.finally(() => {
           this.activeAIRequests.delete(requestId);
         });
-        
+
       } catch (error) {
         if (window.logsPanel) {
           window.logsPanel.addLog('error', `Error processing transcription chunk: ${error.message}`, error.stack, {
@@ -1727,7 +1727,7 @@
             errorName: error.name
           });
         }
-        
+
         // Show error in UI but continue listening
         if (this.realtimeAIResponseEl) {
           const currentText = this.realtimeAIResponseEl.textContent;
@@ -1738,51 +1738,51 @@
         }
       }
     }
-    
+
     async stopRealTimeListening() {
       if (!this.isRealTimeListening) {
         return;
       }
-      
+
       if (window.logsPanel) {
         window.logsPanel.addLog('info', '🛑 Stopping real-time listening...', null, {
           source: 'RealTimeListening',
           action: 'stop_listening'
         });
       }
-      
+
       this.isRealTimeListening = false;
-      
+
       // Stop MediaRecorder
       if (this.realTimeMediaRecorder && this.realTimeMediaRecorder.state !== 'inactive') {
         this.realTimeMediaRecorder.stop();
       }
-      
+
       // Wait for pending transcriptions (with timeout)
       const maxWaitTime = 5000;
       const startWait = Date.now();
       while (this.activeTranscriptions.size > 0 && (Date.now() - startWait) < maxWaitTime) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
+
       // Wait for pending AI requests (with timeout)
       const aiStartWait = Date.now();
       while (this.activeAIRequests.size > 0 && (Date.now() - aiStartWait) < maxWaitTime) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
+
       await this.cleanupRealTimeListening();
-      
+
       // Hide real-time panel
       if (this.realtimePanel) {
         this.realtimePanel.classList.remove('active');
       }
-      
+
       if (this.listenButton) {
         this.listenButton.textContent = '🎤 Listen';
         this.listenButton.classList.remove('listening');
       }
-      
+
       // Update menu buttons
       document.querySelectorAll('.menu-button').forEach(btn => {
         if (btn.textContent.includes('Stop') || btn.id?.includes('listen')) {
@@ -1790,10 +1790,10 @@
           btn.classList.remove('active');
         }
       });
-      
+
       // Show message in chat that listening stopped
       this.addMessage('assistant', '🛑 Real-time listening stopped.');
-      
+
       if (window.logsPanel) {
         const stats = this.realtimeStats || { chunks: 0, transcriptions: 0, aiResponses: 0 };
         window.logsPanel.addLog('success', '✅ Real-time listening stopped', null, {
@@ -1803,7 +1803,7 @@
         });
       }
     }
-    
+
     async cleanupRealTimeListening() {
       try {
         // Stop all audio tracks
@@ -1821,7 +1821,7 @@
           }
           this.desktopStream = null;
         }
-        
+
         if (this.micStream) {
           try {
             this.micStream.getTracks().forEach(track => {
@@ -1836,9 +1836,9 @@
           }
           this.micStream = null;
         }
-        
+
         this.mergedStream = null;
-        
+
         // Close audio context
         if (this.audioContext) {
           try {
@@ -1856,7 +1856,7 @@
           }
           this.audioContext = null;
         }
-        
+
         // Clear MediaRecorder
         if (this.realTimeMediaRecorder) {
           try {
@@ -1868,21 +1868,21 @@
           }
           this.realTimeMediaRecorder = null;
         }
-        
+
         // Clear state
         this.transcriptionAccumulator = '';
         this.lastTranscriptionTime = null;
-        
+
         // Clear active requests (they'll finish on their own or timeout)
         // Just clear the maps
         this.activeTranscriptions.clear();
         // Note: Don't clear activeAIRequests here, let them finish naturally
-        
+
         // Clear UI
         if (this.voiceStatusEl) {
           this.voiceStatusEl.classList.remove('active');
         }
-        
+
         if (window.logsPanel) {
           window.logsPanel.addLog('info', 'Real-time listening cleanup completed', null, {
             source: 'RealTimeListening',
@@ -1899,17 +1899,17 @@
         }
       }
     }
-    
+
     async checkWhisperFallback() {
       try {
         const configResult = await window.electronAPI.getConfig();
         if (configResult.success && configResult.data) {
           const accounts = configResult.data.accounts || [];
           // Check if there's a Groq or OpenAI account with API key
-          const hasGroq = accounts.some(acc => 
+          const hasGroq = accounts.some(acc =>
             acc.type === 'groq' && acc.apiKey && acc.apiKey.trim() !== ''
           );
-          const hasOpenAI = accounts.some(acc => 
+          const hasOpenAI = accounts.some(acc =>
             acc.type === 'openai' && acc.apiKey && acc.apiKey.trim() !== ''
           );
           return hasGroq || hasOpenAI;
@@ -1919,7 +1919,7 @@
       }
       return false;
     }
-    
+
     async switchToWhisperMode() {
       try {
         const configResult = await window.electronAPI.getConfig();
@@ -1927,18 +1927,18 @@
           if (!configResult.data.settings) {
             configResult.data.settings = {};
           }
-          
+
           // Check if Groq account exists (prefer Groq as it's faster)
           const accounts = configResult.data.accounts || [];
           const hasGroq = accounts.some(acc => acc.type === 'groq' && acc.apiKey && acc.apiKey.trim() !== '');
-          
+
           // Prefer Groq Whisper if available, otherwise OpenAI Whisper
           configResult.data.settings.voiceAPI = hasGroq ? 'groq-whisper' : 'openai-whisper';
           await window.electronAPI.saveConfig(configResult.data);
-          
+
           // Reload voice input with Whisper
           this.setupVoiceInput();
-          
+
           // Show success message
           if (this.voiceStatusEl) {
             this.voiceStatusEl.innerHTML = `
@@ -1958,7 +1958,7 @@
         console.error('Failed to switch to Whisper:', e);
       }
     }
-    
+
     showVoiceError(message) {
       // Show error in voice status area
       if (this.voiceStatusEl) {
@@ -1968,7 +1968,7 @@
         `;
         if (typeof feather !== 'undefined') feather.replace();
         this.voiceStatusEl.classList.add('active', 'error');
-        
+
         // Hide after 8 seconds (longer for important messages)
         setTimeout(() => {
           if (this.voiceStatusEl) {
@@ -1980,20 +1980,20 @@
         alert(message);
       }
     }
-    
+
     addMessage(role, content) {
       const message = {
         role,
         content,
         timestamp: new Date().toISOString()
       };
-      
+
       this.messages.push(message);
       this.renderMessage(message);
       this.autoScroll();
       this.scheduleAutoSave();
     }
-    
+
     updateLastAssistantMessage(content) {
       if (this.messages.length > 0 && this.messages[this.messages.length - 1].role === 'assistant') {
         this.messages[this.messages.length - 1].content = content;
@@ -2001,65 +2001,65 @@
         this.autoScroll();
       }
     }
-    
+
     renderMessage(message) {
       const messageDiv = document.createElement('div');
       messageDiv.className = `message message-${message.role}`;
-      
+
       const contentDiv = document.createElement('div');
       contentDiv.className = 'message-content';
-      
+
       // Render Markdown
       const html = window.electronAPI.renderMarkdown(message.content);
       contentDiv.innerHTML = html;
-      
+
       const timestampDiv = document.createElement('div');
       timestampDiv.className = 'message-timestamp';
       const date = new Date(message.timestamp);
       timestampDiv.textContent = date.toLocaleTimeString();
-      
+
       messageDiv.appendChild(contentDiv);
       messageDiv.appendChild(timestampDiv);
-      
+
       this.chatContainer.appendChild(messageDiv);
     }
-    
+
     rerenderMessages() {
       if (!this.chatContainer) return;
       this.chatContainer.innerHTML = '';
-      
+
       // Safety check - ensure messages is an array
       if (!Array.isArray(this.messages)) {
         console.warn('Messages is not an array in rerenderMessages, resetting');
         this.messages = [];
         return;
       }
-      
+
       this.messages.forEach(msg => {
         if (msg && typeof msg === 'object' && msg.role && msg.content) {
           this.renderMessage(msg);
         }
       });
     }
-    
+
     autoScroll() {
       this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
     }
-    
+
     async sendMessage() {
       const content = this.inputArea.value.trim();
       if (!content) return;
-      
+
       this.inputArea.value = '';
       this.inputArea.style.height = 'auto';
-      
+
       this.addMessage('user', content);
-      
+
       window.dispatchEvent(new CustomEvent('chat-send-message', {
         detail: { content }
       }));
     }
-    
+
     async loadChatHistory() {
       try {
         const result = await window.electronAPI.loadChat(this.currentChatId);
@@ -2079,20 +2079,20 @@
             this.messages = [];
             this.context = null;
           }
-          
+
           // Final safety check - ensure messages is always an array
           if (!Array.isArray(this.messages)) {
             console.warn('Messages is not an array, resetting to empty array');
             this.messages = [];
           }
-          
+
           // Validate each message has required fields
           this.messages = this.messages.filter(msg => {
             if (!msg || typeof msg !== 'object') return false;
             if (!msg.role || !msg.content) return false;
             return true;
           });
-          
+
           this.rerenderMessages();
           this.autoScroll();
         } else {
@@ -2110,7 +2110,7 @@
         }
       }
     }
-    
+
     async saveChatHistory() {
       try {
         // Save with context if available
@@ -2126,7 +2126,7 @@
         }
       }
     }
-    
+
     /**
      * Set chat context/description
      * @param {string} context - Context text
@@ -2135,7 +2135,7 @@
       this.context = context || null;
       this.scheduleAutoSave();
     }
-    
+
     /**
      * Get chat context
      * @returns {string|null} Context text
@@ -2143,7 +2143,7 @@
     getContext() {
       return this.context;
     }
-    
+
     /**
      * Switch to a different chat
      * @param {string} chatId - Chat ID
@@ -2152,7 +2152,7 @@
     async switchChat(chatId, context = null) {
       this.currentChatId = chatId;
       this.context = context;
-      
+
       // Try to load existing chat, but if it doesn't exist, start with empty chat
       try {
         await this.loadChatHistory();
@@ -2166,17 +2166,17 @@
         this.rerenderMessages();
       }
     }
-    
+
     scheduleAutoSave() {
       if (this.autoSaveTimer) {
         clearTimeout(this.autoSaveTimer);
       }
-      
+
       this.autoSaveTimer = setTimeout(() => {
         this.saveChatHistory();
       }, 10000);
     }
-    
+
     startAutoSave() {
       setInterval(() => {
         if (this.messages.length > 0) {
@@ -2184,18 +2184,18 @@
         }
       }, 30000);
     }
-    
+
     handleBlur() {
       this.isBlurred = true;
       document.body.classList.add('blurred');
     }
-    
+
     handleFocus() {
       this.isBlurred = false;
       document.body.classList.remove('blurred');
     }
   };
-  
+
   // AuthModal Module (simplified)
   modules.AuthModal = class AuthModal {
     constructor() {
@@ -2203,19 +2203,19 @@
       this.setupMode = false;
       this.onSuccess = null;
     }
-    
+
     async show(isSetup = false, onSuccess = null) {
       this.setupMode = isSetup;
       this.onSuccess = onSuccess;
-      
+
       const modalHTML = `
         <div id="auth-modal" class="auth-modal-overlay">
           <div class="auth-modal-content">
             <h2>${isSetup ? 'Setup Master Password' : 'Enter Master Password'}</h2>
             <p class="auth-modal-description">
-              ${isSetup 
-                ? 'Create a master password to encrypt your chat data. This password cannot be recovered.'
-                : 'Enter your master password to unlock the application.'}
+              ${isSetup
+          ? 'Create a master password to encrypt your chat data. This password cannot be recovered.'
+          : 'Enter your master password to unlock the application.'}
             </p>
             <form id="auth-form">
               <div class="auth-input-group">
@@ -2249,53 +2249,53 @@
           </div>
         </div>
       `;
-      
+
       document.body.insertAdjacentHTML('beforeend', modalHTML);
       this.modal = document.getElementById('auth-modal');
-      
+
       const form = document.getElementById('auth-form');
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         await this.handleSubmit();
       });
-      
+
       document.getElementById('password-input').focus();
     }
-    
+
     async handleSubmit() {
       const password = document.getElementById('password-input').value;
-      const passwordConfirm = this.setupMode 
-        ? document.getElementById('password-confirm')?.value 
+      const passwordConfirm = this.setupMode
+        ? document.getElementById('password-confirm')?.value
         : password;
       const errorDiv = document.getElementById('auth-error');
       const submitBtn = document.getElementById('auth-submit');
-      
+
       // Validate
       if (this.setupMode && password !== passwordConfirm) {
         errorDiv.textContent = 'Passwords do not match';
         errorDiv.style.display = 'block';
         return;
       }
-      
+
       if (this.setupMode && password.length < 12) {
         errorDiv.textContent = 'Password must be at least 12 characters';
         errorDiv.style.display = 'block';
         return;
       }
-      
+
       submitBtn.disabled = true;
       submitBtn.textContent = 'Processing...';
       errorDiv.style.display = 'none';
-      
+
       try {
         let result;
-        
+
         if (this.setupMode) {
           result = await window.electronAPI.setupPassword(password);
         } else {
           result = await window.electronAPI.verifyPassword(password);
         }
-        
+
         if (result.success) {
           this.hide();
           if (this.onSuccess) {
@@ -2313,13 +2313,13 @@
         submitBtn.disabled = false;
         submitBtn.textContent = this.setupMode ? 'Setup Password' : 'Unlock';
       }
-      
+
       const passwordInput = document.getElementById('password-input');
       if (passwordInput) {
         passwordInput.value = '';
       }
     }
-    
+
     hide() {
       if (this.modal) {
         this.modal.remove();
@@ -2327,7 +2327,7 @@
       }
     }
   };
-  
+
   // SettingsPanel Module
   modules.SettingsPanel = class SettingsPanel {
     constructor() {
@@ -2335,7 +2335,7 @@
       this.isOpen = false;
       this.config = null;
     }
-    
+
     async loadConfig() {
       try {
         const result = await window.electronAPI.getConfig();
@@ -2349,12 +2349,12 @@
         this.config = { accounts: [], settings: {} };
       }
     }
-    
+
     async show() {
       if (this.isOpen) return;
-      
+
       await this.loadConfig();
-      
+
       const panelHTML = `
         <div id="settings-panel" class="settings-panel-overlay">
           <div class="settings-panel-content">
@@ -2381,27 +2381,27 @@
           </div>
         </div>
       `;
-      
+
       document.body.insertAdjacentHTML('beforeend', panelHTML);
       this.panel = document.getElementById('settings-panel');
       this.isOpen = true;
-      
+
       document.getElementById('settings-close').addEventListener('click', () => {
         this.hide();
       });
-      
+
       this.panel.addEventListener('click', (e) => {
         if (e.target === this.panel) {
           this.hide();
         }
       });
-      
+
       this.setupFormHandlers();
     }
-    
+
     renderAccountsTab() {
       const accounts = this.config.accounts || [];
-      
+
       return `
         <div class="accounts-list" style="margin-bottom: 20px;">
           ${accounts.map((acc, idx) => `
@@ -2467,10 +2467,10 @@
         </div>
       `;
     }
-    
+
     renderPrivacyTab() {
       const settings = this.config.settings || {};
-      
+
       return `
         <div class="settings-section">
           <h3>Auto-Lock</h3>
@@ -2565,7 +2565,7 @@
         </div>
       `;
     }
-    
+
     setupFormHandlers() {
       // Tab switching
       document.querySelectorAll('.settings-tab').forEach(tab => {
@@ -2579,7 +2579,7 @@
           document.getElementById(`${tabName}-tab`).style.display = 'block';
         });
       });
-      
+
       // Provider type change
       const accountType = document.getElementById('account-type');
       if (accountType) {
@@ -2587,10 +2587,10 @@
           const type = accountType.value;
           const apiKeyGroup = document.getElementById('api-key-group');
           const baseUrlGroup = document.getElementById('base-url-group');
-          
+
           // Update model dropdown when provider type changes
           this.updateModelDropdown(type);
-          
+
           if (type === 'ollama') {
             apiKeyGroup.style.display = 'none';
             baseUrlGroup.style.display = 'block';
@@ -2604,7 +2604,7 @@
           }
         });
       }
-      
+
       // Add account button
       const addAccountBtn = document.getElementById('add-account-btn');
       if (addAccountBtn) {
@@ -2619,7 +2619,7 @@
           document.getElementById('account-base-url').value = '';
         });
       }
-      
+
       // Cancel button
       const cancelBtn = document.getElementById('cancel-account-form');
       if (cancelBtn) {
@@ -2627,7 +2627,7 @@
           document.getElementById('account-form').style.display = 'none';
         });
       }
-      
+
       // Edit/Delete buttons
       document.querySelectorAll('.account-edit-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -2639,15 +2639,15 @@
           document.getElementById('account-type').value = account.type || 'openai';
           document.getElementById('account-api-key').value = ''; // Don't show existing key
           document.getElementById('account-base-url').value = account.baseURL || '';
-          
+
           // Update model dropdown first
           this.updateModelDropdown(account.type || 'openai');
-          
+
           // Set model value (check if it's in dropdown or use custom)
           const modelSelect = document.getElementById('account-model');
           const modelCustomInput = document.getElementById('account-model-custom');
           const savedModel = account.model || '';
-          
+
           if (modelSelect) {
             // Check if model exists in dropdown
             const optionExists = Array.from(modelSelect.options).some(opt => opt.value === savedModel);
@@ -2666,12 +2666,12 @@
               }
             }
           }
-          
+
           // Trigger type change to update visibility
           document.getElementById('account-type').dispatchEvent(new Event('change'));
         });
       });
-      
+
       document.querySelectorAll('.account-delete-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (confirm('Are you sure you want to delete this account?')) {
@@ -2683,7 +2683,7 @@
           }
         });
       });
-      
+
       // Account form submit
       const accountForm = document.getElementById('account-form-content');
       if (accountForm) {
@@ -2692,7 +2692,7 @@
           await this.saveAccount();
         });
       }
-      
+
       // Save privacy settings
       const savePrivacyBtn = document.getElementById('save-privacy-settings');
       if (savePrivacyBtn) {
@@ -2700,7 +2700,7 @@
           await this.savePrivacySettings();
         });
       }
-      
+
       // Always on top checkbox handler
       const alwaysOnTopCheckbox = document.getElementById('always-on-top');
       if (alwaysOnTopCheckbox) {
@@ -2717,7 +2717,7 @@
             await this.saveConfig();
           }
         });
-        
+
         // Load current state on show
         window.electronAPI.getAlwaysOnTop().then(result => {
           if (result.success) {
@@ -2726,18 +2726,18 @@
         });
       }
     }
-    
+
     updateModelDropdown(providerType) {
       const modelSelect = document.getElementById('account-model');
       const modelCustomInput = document.getElementById('account-model-custom');
-      
+
       if (!modelSelect) return;
-      
+
       // Clear existing options
       modelSelect.innerHTML = '<option value="">Select a model...</option>';
-      
+
       let models = [];
-      
+
       switch (providerType) {
         case 'openai':
           models = [
@@ -2761,10 +2761,7 @@
             { value: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B 32K' },
             { value: 'gemma-7b-it', label: 'Gemma 7B IT' },
             { value: 'gemma2-9b-it', label: 'Gemma 2 9B IT' },
-            { value: 'gemma2-27b-it', label: 'Gemma 2 27B IT' },
-            { value: '', label: '--- Whisper Models (Audio Only) ---', disabled: true },
-            { value: 'whisper-large-v3-turbo', label: 'Whisper Large v3 Turbo (Audio Transcription)' },
-            { value: 'whisper-large-v3', label: 'Whisper Large v3 (Audio Transcription)' }
+            { value: 'gemma2-27b-it', label: 'Gemma 2 27B IT' }
           ];
           break;
         case 'ollama':
@@ -2788,7 +2785,7 @@
         default:
           models = [];
       }
-      
+
       // Add models to dropdown
       models.forEach(model => {
         const option = document.createElement('option');
@@ -2800,13 +2797,13 @@
         }
         modelSelect.appendChild(option);
       });
-      
+
       // Add custom option
       const customOption = document.createElement('option');
       customOption.value = '__custom__';
       customOption.textContent = 'Custom (enter below)';
       modelSelect.appendChild(customOption);
-      
+
       // Reset custom input
       if (modelCustomInput) {
         modelCustomInput.value = '';
@@ -2814,29 +2811,29 @@
         modelCustomInput.required = false;
         modelSelect.required = true;
       }
-      
+
       // Setup event listener for model dropdown change (to show/hide custom input)
       this.setupModelDropdownListener();
     }
-    
+
     setupModelDropdownListener() {
       const modelSelect = document.getElementById('account-model');
       const modelCustomInput = document.getElementById('account-model-custom');
-      
+
       if (!modelSelect) return;
-      
+
       // Remove existing listeners by cloning (prevents duplicate listeners)
       const newSelect = modelSelect.cloneNode(true);
       if (modelSelect.parentNode) {
         modelSelect.parentNode.replaceChild(newSelect, modelSelect);
       }
-      
+
       const updatedSelect = document.getElementById('account-model');
       if (updatedSelect) {
         updatedSelect.addEventListener('change', () => {
           const selectedValue = updatedSelect.value;
           const customInput = document.getElementById('account-model-custom');
-          
+
           if (selectedValue === '__custom__') {
             // Show custom input
             if (customInput) {
@@ -2857,23 +2854,23 @@
         });
       }
     }
-    
+
     async saveAccount() {
       const index = parseInt(document.getElementById('account-index').value);
       const modelSelect = document.getElementById('account-model');
       const modelCustomInput = document.getElementById('account-model-custom');
-      
+
       // Get model value (from dropdown or custom input)
       let modelValue = modelSelect.value;
       if (modelValue === '__custom__' && modelCustomInput) {
         modelValue = modelCustomInput.value.trim();
       }
-      
+
       if (!modelValue) {
         alert('Please select or enter a model name');
         return;
       }
-      
+
       // Prevent Whisper models from being saved as chat models
       const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
       if (whisperModels.includes(modelValue)) {
@@ -2891,7 +2888,7 @@
         );
         return;
       }
-      
+
       const account = {
         name: document.getElementById('account-name').value,
         type: document.getElementById('account-type').value,
@@ -2899,69 +2896,69 @@
         apiKey: document.getElementById('account-api-key').value || '',
         baseURL: document.getElementById('account-base-url').value || undefined
       };
-      
+
       // If editing and API key is empty, preserve existing key
       if (index >= 0 && !account.apiKey && this.config.accounts[index]) {
         account.apiKey = this.config.accounts[index].apiKey || '';
       }
-      
+
       if (!this.config.accounts) {
         this.config.accounts = [];
       }
-      
+
       if (index >= 0) {
         this.config.accounts[index] = account;
       } else {
         this.config.accounts.push(account);
       }
-      
+
       await this.saveConfig();
-      
+
       this.hide();
-      
+
       this.hide();
-      
+
       // Notify main app to refresh
       window.dispatchEvent(new CustomEvent('config-updated'));
-      
+
       alert('Account saved successfully! The provider dropdown will update automatically.');
     }
-    
+
     async savePrivacySettings() {
       if (!this.config.settings) {
         this.config.settings = {};
       }
-      
+
       this.config.settings.autoLock = document.getElementById('auto-lock').checked;
       this.config.settings.autoLockMinutes = parseInt(document.getElementById('auto-lock-minutes').value);
       this.config.settings.autoBlur = document.getElementById('auto-blur').checked;
-      
+
       // Get always on top state
       const alwaysOnTopCheckbox = document.getElementById('always-on-top');
       if (alwaysOnTopCheckbox) {
         this.config.settings.alwaysOnTop = alwaysOnTopCheckbox.checked;
       }
-      
+
       // Get voice settings
       const voiceEnabledCheckbox = document.getElementById('voice-enabled');
       if (voiceEnabledCheckbox) {
         this.config.settings.voiceEnabled = voiceEnabledCheckbox.checked;
       }
-      
+
       const voiceAPI = document.getElementById('voice-api');
       if (voiceAPI) {
         this.config.settings.voiceAPI = voiceAPI.value;
       }
-      
+
       const whisperModel = document.getElementById('whisper-model');
       if (whisperModel) {
         this.config.settings.whisperModel = whisperModel.value;
       }
-      
+
       await this.saveConfig();
       alert('Settings saved');
     }
-    
+
     async saveConfig() {
       try {
         const result = await window.electronAPI.saveConfig(this.config);
@@ -2976,7 +2973,7 @@
         alert('Failed to save settings: ' + error.message);
       }
     }
-    
+
     hide() {
       if (this.panel) {
         this.panel.remove();
@@ -2985,17 +2982,17 @@
       }
     }
   };
-  
+
   // Main Application
   let chatUI = null;
   let authModal = null;
   let settingsPanel = null;
   let currentProviderId = null;
   let config = null;
-  
+
   async function initialize() {
     const sessionStatus = await window.electronAPI.getSessionStatus();
-    
+
     if (sessionStatus.needsSetup) {
       // First time setup
       await showAuthModal(true);
@@ -3007,15 +3004,15 @@
       await loadApplication();
     }
   }
-  
+
   async function showAuthModal(isSetup = false) {
     authModal = new modules.AuthModal();
-    
+
     authModal.show(isSetup, async () => {
       await loadApplication();
     });
   }
-  
+
   // LogsPanel Module
   modules.LogsPanel = class LogsPanel {
     constructor() {
@@ -3025,26 +3022,26 @@
       this.maxLogs = 1000;
       this.filterLevel = 'all';
     }
-    
+
     initialize() {
       this.setupErrorHandling();
       this.loadLogs();
     }
-    
+
     setupErrorHandling() {
       const originalError = console.error;
       const originalWarn = console.warn;
-      
+
       console.error = (...args) => {
         this.addLog('error', args.join(' '), new Error().stack);
         originalError.apply(console, args);
       };
-      
+
       console.warn = (...args) => {
         this.addLog('warning', args.join(' '));
         originalWarn.apply(console, args);
       };
-      
+
       window.addEventListener('error', (event) => {
         this.addLog('error', event.message, event.error?.stack, {
           filename: event.filename,
@@ -3052,12 +3049,12 @@
           colno: event.colno
         });
       });
-      
+
       window.addEventListener('unhandledrejection', (event) => {
         this.addLog('error', `Unhandled Promise Rejection: ${event.reason}`, event.reason?.stack);
       });
     }
-    
+
     addLog(level, message, stack = null, details = null) {
       const logEntry = {
         timestamp: new Date().toISOString(),
@@ -3066,22 +3063,22 @@
         stack: stack || null,
         details: details || null
       };
-      
+
       this.logs.push(logEntry);
       if (this.logs.length > this.maxLogs) {
         this.logs.shift();
       }
-      
+
       this.saveLogs();
-      
+
       if (this.isOpen && this.panel) {
         this.renderLogs();
       }
     }
-    
+
     show() {
       if (this.isOpen) return;
-      
+
       const panelHTML = `
         <div id="logs-panel" class="logs-panel-overlay">
           <div class="logs-panel-content">
@@ -3112,39 +3109,39 @@
           </div>
         </div>
       `;
-      
+
       document.body.insertAdjacentHTML('beforeend', panelHTML);
       this.panel = document.getElementById('logs-panel');
       this.isOpen = true;
-      
+
       document.getElementById('logs-close').addEventListener('click', () => {
         this.hide();
       });
-      
+
       document.getElementById('logs-copy').addEventListener('click', () => {
         this.copyLogs();
       });
-      
+
       document.getElementById('logs-clear').addEventListener('click', () => {
         if (confirm('Are you sure you want to clear all logs?')) {
           this.clearLogs();
         }
       });
-      
+
       document.getElementById('logs-filter-level').addEventListener('change', (e) => {
         this.filterLevel = e.target.value;
         this.renderLogs();
       });
-      
+
       this.panel.addEventListener('click', (e) => {
         if (e.target === this.panel) {
           this.hide();
         }
       });
-      
+
       this.renderLogs();
     }
-    
+
     hide() {
       if (this.panel) {
         this.panel.remove();
@@ -3152,11 +3149,11 @@
         this.isOpen = false;
       }
     }
-    
+
     renderLogs() {
       const content = document.getElementById('logs-content');
       const count = document.getElementById('logs-count');
-      
+
       if (this.logs.length === 0) {
         if (content) {
           content.innerHTML = '<div class="logs-empty">No logs yet. Logs will appear here when errors or events occur.</div>';
@@ -3164,11 +3161,11 @@
         if (count) count.textContent = '0 logs';
         return;
       }
-      
-      const filteredLogs = this.filterLevel === 'all' 
-        ? this.logs 
+
+      const filteredLogs = this.filterLevel === 'all'
+        ? this.logs
         : this.logs.filter(log => log.level === this.filterLevel);
-      
+
       if (filteredLogs.length === 0) {
         if (content) {
           content.innerHTML = `<div class="logs-empty">No ${this.filterLevel} logs found.</div>`;
@@ -3176,31 +3173,31 @@
         if (count) count.textContent = '0 logs';
         return;
       }
-      
+
       if (content) {
         content.innerHTML = filteredLogs.map(log => this.renderLogEntry(log)).join('');
         content.scrollTop = content.scrollHeight;
       }
-      
+
       if (count) {
         count.textContent = `${filteredLogs.length} log${filteredLogs.length !== 1 ? 's' : ''}`;
       }
     }
-    
+
     renderLogEntry(log) {
       const date = new Date(log.timestamp);
       const timeStr = date.toLocaleString();
       const div = document.createElement('div');
       div.textContent = log.message;
       const escapedMessage = div.innerHTML;
-      
+
       let stackHtml = '';
       if (log.stack) {
         const stackDiv = document.createElement('div');
         stackDiv.textContent = log.stack;
         stackHtml = `<div class="log-details"><pre>${stackDiv.innerHTML}</pre></div>`;
       }
-      
+
       let detailsHtml = '';
       if (log.details) {
         try {
@@ -3223,7 +3220,7 @@
               return value;
             }, space);
           };
-          
+
           const detailsStr = safeStringify(log.details);
           const detailsDiv = document.createElement('div');
           detailsDiv.textContent = detailsStr;
@@ -3233,7 +3230,7 @@
           detailsHtml = `<div class="log-details"><pre>Error details available but cannot be displayed (circular reference)</pre></div>`;
         }
       }
-      
+
       return `
         <div class="log-entry ${log.level}">
           <div class="log-timestamp">${timeStr}</div>
@@ -3246,24 +3243,24 @@
         </div>
       `;
     }
-    
+
     clearLogs() {
       this.logs = [];
       this.saveLogs();
       this.renderLogs();
     }
-    
+
     async copyLogs() {
       try {
         const logsText = this.logs.map(log => {
           const level = log.level.toUpperCase().padEnd(8);
           const time = new Date(log.timestamp).toLocaleString();
           let text = `[${time}] ${level} ${log.message}`;
-          
+
           if (log.stack) {
             text += '\n' + log.stack;
           }
-          
+
           if (log.details && typeof log.details === 'object') {
             try {
               const detailsStr = JSON.stringify(log.details, null, 2);
@@ -3272,10 +3269,10 @@
               text += '\n' + String(log.details);
             }
           }
-          
+
           return text;
         }).join('\n\n');
-        
+
         // Try to focus the window first (required for clipboard API)
         if (window.electronAPI && window.electronAPI.bringWindowToFront) {
           try {
@@ -3286,7 +3283,7 @@
             // Ignore focus errors
           }
         }
-        
+
         // Try modern clipboard API first
         if (navigator.clipboard && navigator.clipboard.writeText) {
           try {
@@ -3308,7 +3305,7 @@
             console.warn('Clipboard API failed, trying fallback:', err);
           }
         }
-        
+
         // Fallback: Use execCommand (works even when not focused)
         const textArea = document.createElement('textarea');
         textArea.value = logsText;
@@ -3318,11 +3315,11 @@
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
-        
+
         try {
           const successful = document.execCommand('copy');
           document.body.removeChild(textArea);
-          
+
           if (successful) {
             // Show feedback
             const copyBtn = document.getElementById('logs-copy');
@@ -3347,7 +3344,7 @@
         alert('Failed to copy logs to clipboard. Please select and copy manually from the logs panel.');
       }
     }
-    
+
     saveLogs() {
       try {
         const logsToSave = this.logs.slice(-100);
@@ -3356,7 +3353,7 @@
         // Ignore
       }
     }
-    
+
     loadLogs() {
       try {
         const savedLogs = localStorage.getItem('app-logs');
@@ -3368,34 +3365,34 @@
       }
     }
   };
-  
+
   async function loadApplication() {
     console.log('=== renderer-bundle.js: loadApplication() called ===');
-    
+
     await loadConfig();
-    
+
     console.log('Creating ChatUI instance...');
     chatUI = new modules.ChatUI();
     chatUI.initialize();
-    
+
     // Expose chatUI globally so it can be accessed by inline handlers
     window.chatUI = chatUI;
     console.log('✅ ChatUI initialized and exposed to window.chatUI');
-    
+
     settingsPanel = new modules.SettingsPanel();
-    
+
     // Initialize logs panel
     const logsPanel = new modules.LogsPanel();
     logsPanel.initialize();
     window.logsPanel = logsPanel; // Make globally accessible for error logging
-    
+
     // Listen for errors from main process
     window.electronAPI.onLogError((logData) => {
       logsPanel.addLog(logData.level || 'error', logData.message, logData.stack, logData.details);
     });
-    
+
     console.log('Setting up button event listeners...');
-    
+
     const settingsBtn = document.getElementById('settings-button');
     console.log('settings-button found:', !!settingsBtn);
     if (settingsBtn) {
@@ -3416,7 +3413,7 @@
     } else {
       console.warn('⚠️ settings-button not found in DOM');
     }
-    
+
     const logsBtn = document.getElementById('logs-button');
     console.log('logs-button found:', !!logsBtn);
     if (logsBtn) {
@@ -3437,13 +3434,13 @@
     } else {
       console.warn('⚠️ logs-button not found in DOM');
     }
-    
+
     // Initialize chat sidebar
     const chatsSidebar = document.getElementById('chats-sidebar');
     const chatsButton = document.getElementById('chats-button');
     const chatsCloseBtn = document.getElementById('chats-close');
     const newChatBtn = document.getElementById('new-chat-btn');
-    
+
     console.log('chats-button found:', !!chatsButton);
     if (chatsButton && chatsSidebar) {
       // Remove any existing listeners by cloning
@@ -3463,25 +3460,25 @@
     } else {
       console.warn('⚠️ chats-button or chats-sidebar not found in DOM');
     }
-    
+
     if (chatsCloseBtn && chatsSidebar) {
       chatsCloseBtn.addEventListener('click', () => {
         chatsSidebar.style.display = 'none';
         document.body.classList.remove('sidebar-open');
       });
     }
-    
+
     if (newChatBtn) {
       // Remove any existing listeners by cloning
       const newBtn = newChatBtn.cloneNode(true);
       newChatBtn.parentNode.replaceChild(newBtn, newChatBtn);
-      
+
       newBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
         console.log('New chat button clicked in renderer-bundle.js');
-        
+
         // Try multiple ways to show the modal
         if (typeof window.showNewChatModal === 'function') {
           console.log('Calling window.showNewChatModal');
@@ -3515,21 +3512,21 @@
       }, true); // Capture phase
     }
     setupProviderSelector();
-    
+
     // Listen for config updates
     window.addEventListener('config-updated', async () => {
       await loadConfig();
       setupProviderSelector();
     });
-    
+
     window.addEventListener('chat-send-message', async (e) => {
       const content = e.detail.content;
-      
+
       if (!currentProviderId || !config || !config.accounts) {
         chatUI.addMessage('assistant', 'Error: No AI provider configured. Please add an account in Settings.');
         return;
       }
-      
+
       // Find provider config
       const providerConfig = config.accounts.find(acc => acc.name === currentProviderId);
       if (!providerConfig) {
@@ -3543,7 +3540,7 @@
         }
         return;
       }
-      
+
       // Validate that the provider doesn't have a Whisper model (should use chat models)
       const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
       if (providerConfig.model && whisperModels.includes(providerConfig.model)) {
@@ -3560,10 +3557,10 @@
           `   • Chat Models = Used for AI conversations (set in AI Accounts)\n` +
           `   • Whisper Models = Used for voice transcription (set in Voice Input settings)\n\n` +
           `The provider dropdown will automatically filter out Whisper models after you fix this.`;
-        
+
         chatUI.messages[loadingIndex].content = errorMsg;
         chatUI.rerenderMessages();
-        
+
         if (window.logsPanel) {
           window.logsPanel.addLog('error', `❌ Chat blocked: Account "${providerConfig.name}" uses Whisper model "${providerConfig.model}"`, null, {
             source: 'Chat',
@@ -3576,11 +3573,11 @@
         }
         return;
       }
-      
+
       // Show loading message
       chatUI.addMessage('assistant', 'Thinking...');
       const loadingIndex = chatUI.messages.length - 1;
-      
+
       if (window.logsPanel) {
         window.logsPanel.addLog('info', `Sending message to AI: provider="${providerConfig.name}", model="${providerConfig.model || 'default'}"`, null, {
           source: 'Chat',
@@ -3590,7 +3587,7 @@
           chatModel: providerConfig.model
         });
       }
-      
+
       // Prepare messages array
       const messages = chatUI.messages
         .filter((msg, idx) => idx < loadingIndex) // Exclude loading message
@@ -3606,7 +3603,7 @@
           };
         })
         .filter(msg => msg !== null); // Remove invalid messages
-      
+
       // Validate we have at least one message
       if (messages.length === 0) {
         chatUI.messages[loadingIndex].content = 'Error: No valid messages to send';
@@ -3616,7 +3613,7 @@
         }
         return;
       }
-      
+
       try {
         // Send to AI via IPC
         let fullContent = '';
@@ -3628,7 +3625,7 @@
             chatUI.updateLastAssistantMessage(fullContent);
           }
         );
-        
+
         if (result.success) {
           // Message already updated by streaming
           if (result.content) {
@@ -3637,7 +3634,7 @@
         } else {
           const errorMsg = result.error || 'Unknown error';
           const errorDetails = result.details || {};
-          
+
           // Build detailed error message
           let detailedError = errorMsg;
           if (errorDetails.status) {
@@ -3645,18 +3642,18 @@
           }
           if (errorDetails.responseData) {
             try {
-              const responseStr = typeof errorDetails.responseData === 'string' 
-                ? errorDetails.responseData 
+              const responseStr = typeof errorDetails.responseData === 'string'
+                ? errorDetails.responseData
                 : JSON.stringify(errorDetails.responseData, null, 2);
               detailedError += `\n\nResponse: ${responseStr}`;
             } catch (e) {
               // Ignore JSON stringify errors
             }
           }
-          
+
           chatUI.messages[loadingIndex].content = `Error: ${errorMsg}`;
           chatUI.rerenderMessages();
-          
+
           // Log error with full details (safely)
           if (window.logsPanel) {
             try {
@@ -3667,7 +3664,7 @@
                 status: errorDetails.status,
                 response: errorDetails.responseData
               };
-              
+
               window.logsPanel.addLog('error', 'AI request failed: ' + errorMsg, null, safeDetails);
             } catch (e) {
               // If logging fails, just log the basic message
@@ -3694,7 +3691,7 @@
         }
       }
     });
-    
+
     // Initialize voice assistant from renderer.js after everything else is ready
     if (typeof window.initializeVoiceAssistant === 'function') {
       console.log('Calling window.initializeVoiceAssistant from renderer-bundle.js');
@@ -3713,7 +3710,7 @@
       console.warn('window.initializeVoiceAssistant not found - voice assistant may not work');
     }
   }
-  
+
   async function loadConfig() {
     try {
       const result = await window.electronAPI.getConfig();
@@ -3727,13 +3724,13 @@
       config = { accounts: [], settings: {} };
     }
   }
-  
+
   function setupProviderSelector() {
     const selector = document.getElementById('provider-selector');
     if (!selector || !config) return;
-    
+
     selector.innerHTML = '<option value="">No provider</option>';
-    
+
     if (config.accounts && config.accounts.length > 0) {
       // Filter out accounts with Whisper models (they can't be used for chat)
       const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
@@ -3741,14 +3738,14 @@
         if (!acc.model) return true; // No model set, allow it
         return !whisperModels.includes(acc.model);
       });
-      
+
       validAccounts.forEach(acc => {
         const option = document.createElement('option');
         option.value = acc.name;
         option.textContent = acc.name + (acc.model ? ` (${acc.model})` : '');
         selector.appendChild(option);
       });
-      
+
       if (!currentProviderId && validAccounts.length > 0) {
         currentProviderId = validAccounts[0].name;
         selector.value = currentProviderId;
@@ -3774,17 +3771,17 @@
         }
       }
     }
-    
+
     // Handle selector change - remove old listeners first
     const newSelector = selector.cloneNode(true);
     selector.parentNode.replaceChild(newSelector, selector);
     const updatedSelector = document.getElementById('provider-selector');
-    
+
     if (updatedSelector) {
       updatedSelector.addEventListener('change', (e) => {
         const selectedValue = e.target.value || null;
         const selectedOption = e.target.options[e.target.selectedIndex];
-        
+
         // Prevent selecting disabled (Whisper model) accounts
         if (selectedOption && selectedOption.disabled) {
           alert('This account uses a Whisper model, which is for audio transcription only.\n\nPlease edit this account in Settings → AI Accounts and change the model to a chat model (e.g., llama-3.1-8b-instant).');
@@ -3801,10 +3798,10 @@
           }
           return;
         }
-        
+
         currentProviderId = selectedValue;
         window.currentProviderId = currentProviderId;
-        
+
         if (window.logsPanel && currentProviderId) {
           const selectedAccount = config.accounts.find(acc => acc.name === currentProviderId);
           if (selectedAccount) {
@@ -3819,7 +3816,7 @@
       });
     }
   }
-  
+
   async function loadConfig() {
     try {
       const result = await window.electronAPI.getConfig();
@@ -3833,12 +3830,12 @@
       config = { accounts: [], settings: {} };
     }
   }
-  
+
   // Chat Management Functions
   async function loadChatsList() {
     const chatsList = document.getElementById('chats-list');
     if (!chatsList) return;
-    
+
     try {
       const result = await window.electronAPI.listChats();
       if (result.success && result.chats) {
@@ -3846,12 +3843,12 @@
           chatsList.innerHTML = '<div class="chats-empty">No chats yet. Create a new chat to get started!</div>';
           return;
         }
-        
+
         chatsList.innerHTML = result.chats.map(chat => {
           const date = new Date(chat.date);
           const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           const isActive = chat.id === chatUI.currentChatId;
-          
+
           return `
             <div class="chat-item ${isActive ? 'active' : ''}" data-chat-id="${chat.id}">
               <div class="chat-item-info">
@@ -3865,7 +3862,7 @@
             </div>
           `;
         }).join('');
-        
+
         // Add click handlers
         chatsList.querySelectorAll('.chat-item').forEach(item => {
           item.addEventListener('click', (e) => {
@@ -3875,7 +3872,7 @@
             }
           });
         });
-        
+
         // Add delete handlers
         chatsList.querySelectorAll('.chat-delete-btn').forEach(btn => {
           btn.addEventListener('click', async (e) => {
@@ -3894,39 +3891,39 @@
       chatsList.innerHTML = '<div class="chats-empty">Error loading chats.</div>';
     }
   }
-  
+
   async function createNewChat() {
     const chatId = 'chat-' + Date.now();
     chatUI.currentChatId = chatId;
     chatUI.messages = [];
     chatUI.rerenderMessages();
-    
+
     // Hide sidebar
     const chatsSidebar = document.getElementById('chats-sidebar');
     if (chatsSidebar) {
       chatsSidebar.style.display = 'none';
       document.body.classList.remove('sidebar-open');
     }
-    
+
     // Reload chats list
     await loadChatsList();
   }
-  
+
   async function loadChat(chatId) {
     chatUI.currentChatId = chatId;
     await chatUI.loadChatHistory();
-    
+
     // Hide sidebar
     const chatsSidebar = document.getElementById('chats-sidebar');
     if (chatsSidebar) {
       chatsSidebar.style.display = 'none';
       document.body.classList.remove('sidebar-open');
     }
-    
+
     // Reload chats list to update active state
     await loadChatsList();
   }
-  
+
   async function deleteChat(chatId) {
     try {
       const result = await window.electronAPI.deleteChat(chatId);
@@ -3937,7 +3934,7 @@
           chatUI.messages = [];
           chatUI.rerenderMessages();
         }
-        
+
         // Reload chats list
         await loadChatsList();
       } else {
@@ -3948,18 +3945,18 @@
       alert('Failed to delete chat: ' + error.message);
     }
   }
-  
+
   function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
   }
-  
+
   // Chat Management Functions
   async function loadChatsList() {
     const chatsList = document.getElementById('chats-list');
     if (!chatsList) return;
-    
+
     try {
       const result = await window.electronAPI.listChats();
       if (result.success && result.chats) {
@@ -3967,12 +3964,12 @@
           chatsList.innerHTML = '<div class="chats-empty">No chats yet. Create a new chat to get started!</div>';
           return;
         }
-        
+
         chatsList.innerHTML = result.chats.map(chat => {
           const date = new Date(chat.date);
           const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           const isActive = chat.id === chatUI.currentChatId;
-          
+
           return `
             <div class="chat-item ${isActive ? 'active' : ''}" data-chat-id="${chat.id}">
               <div class="chat-item-info">
@@ -3986,7 +3983,7 @@
             </div>
           `;
         }).join('');
-        
+
         // Add click handlers
         chatsList.querySelectorAll('.chat-item').forEach(item => {
           item.addEventListener('click', (e) => {
@@ -3996,7 +3993,7 @@
             }
           });
         });
-        
+
         // Add delete handlers
         chatsList.querySelectorAll('.chat-delete-btn').forEach(btn => {
           btn.addEventListener('click', async (e) => {
@@ -4015,39 +4012,39 @@
       chatsList.innerHTML = '<div class="chats-empty">Error loading chats.</div>';
     }
   }
-  
+
   async function createNewChat() {
     const chatId = 'chat-' + Date.now();
     chatUI.currentChatId = chatId;
     chatUI.messages = [];
     chatUI.rerenderMessages();
-    
+
     // Hide sidebar
     const chatsSidebar = document.getElementById('chats-sidebar');
     if (chatsSidebar) {
       chatsSidebar.style.display = 'none';
       document.body.classList.remove('sidebar-open');
     }
-    
+
     // Reload chats list
     await loadChatsList();
   }
-  
+
   async function loadChat(chatId) {
     chatUI.currentChatId = chatId;
     await chatUI.loadChatHistory();
-    
+
     // Hide sidebar
     const chatsSidebar = document.getElementById('chats-sidebar');
     if (chatsSidebar) {
       chatsSidebar.style.display = 'none';
       document.body.classList.remove('sidebar-open');
     }
-    
+
     // Reload chats list to update active state
     await loadChatsList();
   }
-  
+
   async function deleteChat(chatId) {
     try {
       const result = await window.electronAPI.deleteChat(chatId);
@@ -4058,7 +4055,7 @@
           chatUI.messages = [];
           chatUI.rerenderMessages();
         }
-        
+
         // Reload chats list
         await loadChatsList();
       } else {
@@ -4069,23 +4066,23 @@
       alert('Failed to delete chat: ' + error.message);
     }
   }
-  
+
   function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
   }
-  
-    // Expose functions for settings panel
-    window.loadConfig = loadConfig;
-    window.setupProviderSelector = setupProviderSelector;
-    window.currentProviderId = currentProviderId; // Expose as property for easy access
-    window.getCurrentProviderId = () => currentProviderId;
-    window.setCurrentProviderId = (id) => { 
-      currentProviderId = id; 
-      window.currentProviderId = id; // Keep in sync
-    };
-  
+
+  // Expose functions for settings panel
+  window.loadConfig = loadConfig;
+  window.setupProviderSelector = setupProviderSelector;
+  window.currentProviderId = currentProviderId; // Expose as property for easy access
+  window.getCurrentProviderId = () => currentProviderId;
+  window.setCurrentProviderId = (id) => {
+    currentProviderId = id;
+    window.currentProviderId = id; // Keep in sync
+  };
+
   // Navigation Handler
   function setupNavigation() {
     // Landing page buttons
@@ -4095,7 +4092,7 @@
     const landingScreenshot = document.getElementById('menu-screenshot');
     const landingSettings = document.getElementById('menu-settings');
     const landingQuit = document.getElementById('menu-quit');
-    
+
     // Top menu buttons (in main view)
     const topListen = document.getElementById('top-menu-listen');
     const topMeeting = document.getElementById('top-menu-meeting');
@@ -4103,25 +4100,25 @@
     const topScreenshot = document.getElementById('top-menu-screenshot');
     const topSettings = document.getElementById('top-menu-settings');
     const topQuit = document.getElementById('top-menu-quit');
-    
+
     // Close view button
     const closeViewBtn = document.getElementById('close-view');
-    
+
     const landingView = document.getElementById('landing-view');
     const mainView = document.getElementById('main-view');
     const askView = document.getElementById('ask-view');
     const chatView = document.getElementById('chat-view');
     const askInput = document.getElementById('ask-input');
     const askSendBtn = document.getElementById('ask-send-btn');
-    
+
     function showView(viewName) {
       landingView.style.display = 'none';
       mainView.classList.add('active');
-      
+
       // Hide all views
       askView.style.display = 'none';
       chatView.style.display = 'none';
-      
+
       // Show selected view
       if (viewName === 'ask') {
         askView.style.display = 'flex';
@@ -4130,7 +4127,7 @@
       } else if (viewName === 'chat') {
         chatView.style.display = 'flex';
       }
-      
+
       // Update active buttons
       document.querySelectorAll('.menu-button').forEach(btn => btn.classList.remove('active'));
       if (viewName === 'ask') {
@@ -4138,12 +4135,12 @@
         topScreenshot?.classList.add('active');
       }
     }
-    
+
     function showLanding() {
       mainView.classList.remove('active');
       landingView.style.display = 'flex';
     }
-    
+
     // View switching handlers removed - using old UI
     topSettings?.addEventListener('click', () => {
       if (window.settingsPanel) {
@@ -4155,10 +4152,10 @@
         window.electronAPI.quitApp();
       }
     });
-    
+
     // Close view button
     closeViewBtn?.addEventListener('click', () => showLanding());
-    
+
     // Ask view send handler
     askSendBtn?.addEventListener('click', () => {
       const text = askInput?.value.trim();
@@ -4180,7 +4177,7 @@
         askInput.value = '';
       }
     });
-    
+
     // Ask input Enter key handler
     askInput?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -4188,30 +4185,30 @@
         askSendBtn?.click();
       }
     });
-    
+
     // Auto-resize textarea
-    askInput?.addEventListener('input', function() {
+    askInput?.addEventListener('input', function () {
       this.style.height = 'auto';
       this.style.height = Math.min(this.scrollHeight, 200) + 'px';
     });
-    
+
     // Context toggle
     const contextToggle = document.getElementById('context-toggle');
-    contextToggle?.addEventListener('click', function() {
+    contextToggle?.addEventListener('click', function () {
       this.classList.toggle('active');
       this.textContent = this.classList.contains('active') ? 'On' : 'Off';
     });
-    
+
     // Size buttons
     ['small', 'medium', 'full'].forEach(size => {
       const btn = document.getElementById(`size-${size}`);
-      btn?.addEventListener('click', function() {
+      btn?.addEventListener('click', function () {
         document.querySelectorAll('.size-button').forEach(b => b.classList.remove('active'));
         this.classList.add('active');
       });
     });
   }
-  
+
   // Browser View Handler with Tabs Support
   function setupBrowserView() {
     const browserButton = document.getElementById('browser-button');
@@ -4230,17 +4227,17 @@
     const browserIncognitoBtn = document.getElementById('browser-incognito');
     const browserTabsContainer = document.getElementById('browser-tabs-container');
     const browserTabsContent = document.getElementById('browser-tabs-content');
-    
+
     if (!browserView || !browserTabsContainer || !browserTabsContent) {
       // Browser elements not found, skip setup
       return;
     }
-    
+
     let isBrowserOpen = false;
     let tabs = [];
     let activeTabId = null;
     let tabIdCounter = 0;
-    
+
     function showBrowser() {
       // Add class to body for split view
       document.body.classList.add('browser-open');
@@ -4252,13 +4249,13 @@
         browserButton.innerHTML = '<i data-feather="message-circle" class="icon icon-small"></i> Chat';
         if (typeof feather !== 'undefined') feather.replace();
       }
-      
+
       // Create first tab if none exist
       if (tabs.length === 0) {
         createTab('https://www.google.com', false);
       }
     }
-    
+
     function hideBrowser() {
       // Remove class from body to hide browser
       document.body.classList.remove('browser-open');
@@ -4271,7 +4268,7 @@
         if (typeof feather !== 'undefined') feather.replace();
       }
     }
-    
+
     function createTab(url = 'https://www.google.com', incognito = false) {
       const tabId = `tab-${++tabIdCounter}`;
       const tab = {
@@ -4281,9 +4278,9 @@
         incognito: incognito,
         loading: false
       };
-      
+
       tabs.push(tab);
-      
+
       // Create tab button
       const tabButton = document.createElement('div');
       tabButton.className = 'browser-tab' + (incognito ? ' browser-tab-incognito' : '');
@@ -4293,43 +4290,43 @@
         <button class="browser-tab-close" title="Close tab"><i data-feather="x" class="icon icon-small"></i></button>
       `;
       if (typeof feather !== 'undefined') feather.replace();
-      
+
       // Insert before new tab button
       if (browserNewTabBtn && browserNewTabBtn.parentNode) {
         browserNewTabBtn.parentNode.insertBefore(tabButton, browserNewTabBtn);
       }
-      
+
       // Create tab content with webview
       const tabContent = document.createElement('div');
       tabContent.className = 'browser-tab-content';
       tabContent.id = `tab-content-${tabId}`;
       tabContent.dataset.tabId = tabId;
-      
+
       const webview = document.createElement('webview');
       webview.id = `webview-${tabId}`;
       webview.src = url;
       webview.style.cssText = 'flex: 1; width: 100%; height: 100%; background: white; border: none; min-height: 0;';
-      
+
       // Set partition for incognito (use temporary partition for true incognito)
       if (incognito) {
         webview.partition = `incognito-${tabId}`; // Temporary partition, cleared on close
       }
-      
+
       tabContent.appendChild(webview);
       browserTabsContent.appendChild(tabContent);
-      
+
       // Tab close button
       const closeBtn = tabButton.querySelector('.browser-tab-close');
       closeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         closeTab(tabId);
       });
-      
+
       // Tab click to switch
       tabButton.addEventListener('click', () => {
         switchTab(tabId);
       });
-      
+
       // Webview event handlers
       webview.addEventListener('did-start-loading', () => {
         tab.loading = true;
@@ -4343,7 +4340,7 @@
         if (browserBack) browserBack.disabled = true;
         if (browserForward) browserForward.disabled = true;
       });
-      
+
       webview.addEventListener('did-stop-loading', () => {
         tab.loading = false;
         try {
@@ -4360,12 +4357,12 @@
             console.warn('Error updating navigation buttons:', e.message);
           }
         }, 100);
-        
+
         if (activeTabId === tabId && browserUrl) {
           browserUrl.value = tab.url;
         }
       });
-      
+
       // Also listen for dom-ready event to update navigation buttons
       webview.addEventListener('dom-ready', () => {
         setTimeout(() => {
@@ -4376,12 +4373,12 @@
           }
         }, 100);
       });
-      
+
       webview.addEventListener('page-title-updated', (event) => {
         tab.title = event.title || 'New Tab';
         updateTabTitle(tabId);
       });
-      
+
       webview.addEventListener('did-fail-load', (event) => {
         tab.loading = false;
         if (event.errorCode !== -3) {
@@ -4395,25 +4392,25 @@
           }
         }
       });
-      
+
       webview.addEventListener('new-window', (event) => {
         event.preventDefault();
         // Open in new tab
         createTab(event.url, incognito);
       });
-      
+
       // Switch to new tab
       switchTab(tabId);
-      
+
       return tabId;
     }
-    
+
     function closeTab(tabId) {
       const tabIndex = tabs.findIndex(t => t.id === tabId);
       if (tabIndex === -1) return;
-      
+
       const tab = tabs[tabIndex];
-      
+
       // Clean up incognito session if needed
       if (tab.incognito && window.electronAPI) {
         // Request main process to clear session
@@ -4427,14 +4424,14 @@
           }
         }
       }
-      
+
       // Remove tab from array
       tabs.splice(tabIndex, 1);
-      
+
       // Remove tab button
       const tabButton = document.querySelector(`.browser-tab[data-tab-id="${tabId}"]`);
       if (tabButton) tabButton.remove();
-      
+
       // Remove tab content
       const tabContent = document.getElementById(`tab-content-${tabId}`);
       if (tabContent) {
@@ -4444,7 +4441,7 @@
         }
         tabContent.remove();
       }
-      
+
       // Switch to another tab if closing active tab
       if (activeTabId === tabId) {
         if (tabs.length > 0) {
@@ -4455,45 +4452,45 @@
           updateNavigationButtons(null);
         }
       }
-      
+
       // Close browser if no tabs left
       if (tabs.length === 0) {
         hideBrowser();
       }
     }
-    
+
     function switchTab(tabId) {
       const tab = tabs.find(t => t.id === tabId);
       if (!tab) return;
-      
+
       activeTabId = tabId;
-      
+
       // Update tab buttons
       document.querySelectorAll('.browser-tab').forEach(btn => {
         btn.classList.remove('active');
       });
       const activeTabButton = document.querySelector(`.browser-tab[data-tab-id="${tabId}"]`);
       if (activeTabButton) activeTabButton.classList.add('active');
-      
+
       // Update tab content visibility
       document.querySelectorAll('.browser-tab-content').forEach(content => {
         content.classList.remove('active');
       });
       const activeTabContent = document.getElementById(`tab-content-${tabId}`);
       if (activeTabContent) activeTabContent.classList.add('active');
-      
+
       // Update URL bar
       if (browserUrl) {
         browserUrl.value = tab.url || 'https://www.google.com';
       }
-      
+
       updateNavigationButtons(tabId);
     }
-    
+
     function updateTabTitle(tabId) {
       const tab = tabs.find(t => t.id === tabId);
       if (!tab) return;
-      
+
       const tabButton = document.querySelector(`.browser-tab[data-tab-id="${tabId}"]`);
       if (tabButton) {
         const titleEl = tabButton.querySelector('.browser-tab-title');
@@ -4504,15 +4501,15 @@
         }
       }
     }
-    
+
     function navigate(url) {
       if (!activeTabId) return;
-      
+
       const tab = tabs.find(t => t.id === activeTabId);
       if (!tab) return;
-      
+
       let finalUrl = url.trim();
-      
+
       // Add protocol if missing
       if (!finalUrl.match(/^https?:\/\//i)) {
         // Check if it looks like a domain
@@ -4523,7 +4520,7 @@
           finalUrl = 'https://www.google.com/search?q=' + encodeURIComponent(finalUrl);
         }
       }
-      
+
       const webview = document.getElementById(`webview-${activeTabId}`);
       if (webview) {
         webview.src = finalUrl;
@@ -4531,7 +4528,7 @@
         if (browserUrl) browserUrl.value = finalUrl;
       }
     }
-    
+
     function updateNavigationButtons(tabId) {
       try {
         if (!tabId) {
@@ -4539,18 +4536,18 @@
           if (browserForward) browserForward.disabled = true;
           return;
         }
-        
+
         const webview = document.getElementById(`webview-${tabId}`);
         if (!webview) {
           if (browserBack) browserBack.disabled = true;
           if (browserForward) browserForward.disabled = true;
           return;
         }
-        
+
         // Robust check for webview readiness
         // The error "WebView must be attached to the DOM" can be thrown by simple property access
         // so we wrap everything in try-catch
-        
+
         // Try to access webview properties safely
         let isReady = false;
         try {
@@ -4560,7 +4557,7 @@
           // Ignore access errors
           isReady = false;
         }
-        
+
         if (isReady) {
           if (browserBack) {
             try {
@@ -4592,7 +4589,7 @@
         }
       }
     }
-    
+
     // Browser button toggle
     browserButton?.addEventListener('click', () => {
       if (isBrowserOpen) {
@@ -4601,22 +4598,22 @@
         showBrowser();
       }
     });
-    
+
     // Close browser button
     browserCloseBtn?.addEventListener('click', () => {
       hideBrowser();
     });
-    
+
     // New tab button
     browserNewTabBtn?.addEventListener('click', () => {
       createTab('https://www.google.com', false);
     });
-    
+
     // New incognito tab button
     browserNewIncognitoTabBtn?.addEventListener('click', () => {
       createTab('https://www.google.com', true);
     });
-    
+
     // New window button
     browserNewWindowBtn?.addEventListener('click', async () => {
       if (window.electronAPI && window.electronAPI.createBrowserWindow) {
@@ -4635,7 +4632,7 @@
         }
       }
     });
-    
+
     // Incognito window button
     browserIncognitoBtn?.addEventListener('click', async () => {
       if (window.electronAPI && window.electronAPI.createBrowserWindow) {
@@ -4654,21 +4651,21 @@
         }
       }
     });
-    
+
     // Navigate on Go button or Enter key
     browserGo?.addEventListener('click', () => {
       if (browserUrl) {
         navigate(browserUrl.value);
       }
     });
-    
+
     browserUrl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
         navigate(browserUrl.value);
       }
     });
-    
+
     // Navigation buttons
     browserBack?.addEventListener('click', () => {
       if (!activeTabId) return;
@@ -4677,7 +4674,7 @@
         webview.goBack();
       }
     });
-    
+
     browserForward?.addEventListener('click', () => {
       if (!activeTabId) return;
       const webview = document.getElementById(`webview-${activeTabId}`);
@@ -4685,11 +4682,11 @@
         webview.goForward();
       }
     });
-    
+
     browserHome?.addEventListener('click', () => {
       navigate('https://www.google.com');
     });
-    
+
     browserRefresh?.addEventListener('click', () => {
       if (!activeTabId) return;
       const webview = document.getElementById(`webview-${activeTabId}`);
@@ -4698,7 +4695,7 @@
       }
     });
   }
-  
+
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
@@ -4711,6 +4708,6 @@
     setupNavigation();
     initialize();
   }
-  
+
 })();
 

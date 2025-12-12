@@ -751,7 +751,34 @@ class VoiceAssistant {
               this.onTranscription(text);
             }
 
-            await this.generateResponse(text);
+            if (this.mode === 'mine') {
+              console.log('Mine mode: Auto-filling input and clicking send');
+
+              // Find input and send button
+              const input = this.chatUI?.inputArea || document.getElementById('message-input');
+              const sendBtn = this.chatUI?.sendButton || document.getElementById('send-button');
+
+              if (input && sendBtn) {
+                // Set input value
+                input.value = text;
+                // Trigger input event to ensure any binding/resizing happens
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+
+                // Click send button to use the standard chat logic
+                // This ensures we get the "100% working" chat behavior user wants
+                setTimeout(() => {
+                  sendBtn.click();
+                }, 100);
+              } else {
+                console.warn('VoiceAssistant: Could not find input or send button, falling back to internal response generation');
+                await this.generateResponse(text);
+              }
+            } else {
+              // For 'yours' mode (system audio), keep using internal generation 
+              // to maintain specific system prompts and context handling
+              console.log('Yours mode: Calling internal generateResponse');
+              await this.generateResponse(text);
+            }
           }
         } else {
           this.lastTranscription = '...';
@@ -845,6 +872,7 @@ class VoiceAssistant {
    * Generate AI response (using chat history from ChatUI)
    */
   async generateResponse(userText) {
+    console.log('generateResponse called with text:', userText);
     try {
       // Reload config to ensure we have the latest keys/settings
       await this.loadConfig();
@@ -861,11 +889,16 @@ class VoiceAssistant {
           }));
       }
 
-      // Add current user message
-      messages.push({
-        role: 'user',
-        content: userText
-      });
+      // Check if the user message was already added by onTranscription callback
+      // If the last message is already the user message, don't add it again
+      const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+      if (!lastMessage || lastMessage.role !== 'user' || lastMessage.content !== userText) {
+        // User message not found in chat history, add it
+        messages.push({
+          role: 'user',
+          content: userText
+        });
+      }
 
       // Get chat context if available
       let chatContext = null;
@@ -907,9 +940,27 @@ class VoiceAssistant {
       }
 
       if (!providerConfig) {
+        console.error('generateResponse: No AI provider configured');
+        console.error('Current provider:', this.currentProvider);
+        console.error('Available accounts:', accounts);
         this.showError('No AI provider configured');
+        if (this.chatUI) this.chatUI.addMessage('assistant', '[Error: No AI provider configured. Please check Settings.]');
         return;
       }
+
+      // Validate provider config has required fields
+      if (!providerConfig.apiKey) {
+        console.error('generateResponse: Provider config missing API key');
+        this.showError('API key missing for provider');
+        if (this.chatUI) this.chatUI.addMessage('assistant', '[Error: API key missing. Please check Settings.]');
+        return;
+      }
+
+      console.log('Provider config validated:', {
+        type: providerConfig.type,
+        model: providerConfig.model,
+        hasApiKey: !!providerConfig.apiKey
+      });
 
       // Prepare system prompt with context
       let systemPrompt = this.mode === 'mine'
@@ -949,16 +1000,16 @@ class VoiceAssistant {
 
       // Use streaming API with immediate UI updates
       try {
+        console.log('Starting AI stream with provider:', providerConfig.type, 'model:', providerConfig.model);
+        console.log('Messages count:', messagesWithSystem.length);
+
         await window.electronAPI.sendAIMessageStream(
           providerConfig,
           messagesWithSystem,
           (chunk) => {
-            // Handle error chunks
-            if (typeof chunk === 'string' && chunk.startsWith('[ERROR]')) {
-              throw new Error(chunk.substring(7));
-            }
-
             this.responseBuffer += chunk;
+            console.log('Received chunk, buffer length:', this.responseBuffer.length);
+
             // Update UI immediately on each chunk for low latency
             if (this.onResponse) {
               this.onResponse(this.responseBuffer, false);
@@ -967,18 +1018,28 @@ class VoiceAssistant {
         );
 
         // Final response
-        if (this.responseBuffer) {
+        console.log('Stream complete, final buffer length:', this.responseBuffer.length);
+        if (this.responseBuffer && this.responseBuffer.trim()) {
           if (this.onResponse) {
             this.onResponse(this.responseBuffer, true);
           }
+        } else {
+          console.warn('Stream completed but response buffer is empty or whitespace');
+          if (this.chatUI) {
+            this.chatUI.addMessage('assistant', '[Error: Received empty response from AI]');
+          }
         }
       } catch (streamError) {
+        console.error('Stream error caught:', streamError);
         throw streamError;
       }
 
     } catch (error) {
       console.error('Failed to generate response:', error);
       this.showError(`Response error: ${error.message}`);
+      if (this.chatUI && typeof this.chatUI.addMessage === 'function') {
+        this.chatUI.addMessage('assistant', `[Error: ${error.message}]`);
+      }
     }
   }
 
