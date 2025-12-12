@@ -15,6 +15,7 @@ app.allowRendererProcessReuse = true;
 
 let mainWindow = null;
 let sessionKey = null; // Encrypted session key (memory only)
+let savedBounds = null; // Store window position/size when hidden
 
 /**
  * Create main application window
@@ -45,10 +46,10 @@ function createWindow() {
 
   // Security: Enable content protection (prevents screen sharing)
   mainWindow.setContentProtection(true);
-  
+
   // Set always on top from config (default: true)
   mainWindow.setAlwaysOnTop(true);
-  
+
   // Try to load config and apply always-on-top setting
   try {
     const fs = require('fs').promises;
@@ -56,7 +57,7 @@ function createWindow() {
     const { app } = require('electron');
     const userDataPath = app.getPath('userData');
     const configPath = path.join(userDataPath, '.config.enc');
-    
+
     // Check if config exists (don't try to decrypt here, just check default)
     // Will be properly loaded after authentication
     // For now, default to always on top
@@ -76,22 +77,22 @@ function createWindow() {
       mainWindow.focus();
     }
   });
-    // Show window when ready
-    mainWindow.once('ready-to-show', () => {
-      if (mainWindow) {
-        mainWindow.show();
-        // Ensure always-on-top is enabled
-        mainWindow.setAlwaysOnTop(true);
-        mainWindow.focus();
-        
-        // Open DevTools in development (F12 or Ctrl+Shift+I)
-        if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
-          // Open DevTools automatically in dev mode
-          mainWindow.webContents.openDevTools();
-        }
+  // Show window when ready
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      // Ensure always-on-top is enabled
+      mainWindow.setAlwaysOnTop(true);
+      mainWindow.focus();
+
+      // Open DevTools in development (F12 or Ctrl+Shift+I)
+      if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
+        // Open DevTools automatically in dev mode
+        mainWindow.webContents.openDevTools();
       }
-    });
-      // Keyboard shortcut to toggle DevTools (F12 or Ctrl+Shift+I)
+    }
+  });
+  // Keyboard shortcut to toggle DevTools (F12 or Ctrl+Shift+I)
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) {
       if (mainWindow.webContents.isDevToolsOpened()) {
@@ -113,7 +114,7 @@ function createWindow() {
   mainWindow.on('blur', () => {
     if (mainWindow) {
       mainWindow.webContents.send('window-blurred');
-      
+
       // Always ensure window stays on top
       // Re-apply always-on-top to ensure it stays active
       if (!mainWindow.isAlwaysOnTop()) {
@@ -121,7 +122,7 @@ function createWindow() {
       }
     }
   });
-  
+
   // Periodically ensure always-on-top is enabled
   setInterval(() => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -135,7 +136,7 @@ function createWindow() {
   mainWindow.on('focus', () => {
     if (mainWindow) {
       mainWindow.webContents.send('window-focused');
-      
+
       // Ensure always-on-top is enabled when window gains focus
       if (!mainWindow.isAlwaysOnTop()) {
         mainWindow.setAlwaysOnTop(true);
@@ -146,7 +147,7 @@ function createWindow() {
   // Security: Prevent navigation to external URLs
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl);
-    
+
     if (parsedUrl.origin !== 'file://') {
       event.preventDefault();
     }
@@ -164,7 +165,7 @@ function createWindow() {
   ipcHandlers.registerHandlers(mainWindow, () => sessionKey, (key) => {
     sessionKey = key;
   });
-  
+
   // Setup hide/show with position saving
   const hideWindow = () => {
     if (mainWindow && mainWindow.isVisible()) {
@@ -172,7 +173,7 @@ function createWindow() {
       mainWindow.hide();
     }
   };
-  
+
   const showWindow = () => {
     if (mainWindow) {
       if (savedBounds) {
@@ -183,7 +184,7 @@ function createWindow() {
       mainWindow.focus();
     }
   };
-  
+
   const toggleWindow = () => {
     if (mainWindow) {
       if (mainWindow.isVisible()) {
@@ -193,7 +194,7 @@ function createWindow() {
       }
     }
   };
-  
+
   // Store functions for use by system tray
   global.toggleWindow = toggleWindow;
 
@@ -297,7 +298,7 @@ app.on('before-quit', () => {
 process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
   securityMonitor.logError(error);
-  
+
   // Send to renderer for logging if window exists
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('log-error', {
@@ -312,7 +313,7 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled rejection:', reason);
   securityMonitor.logError(reason);
-  
+
   // Send to renderer for logging if window exists
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('log-error', {
