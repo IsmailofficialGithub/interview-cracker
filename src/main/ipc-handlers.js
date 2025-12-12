@@ -7,11 +7,11 @@ const { ipcMain } = require('electron');
 const crypto = require('crypto');
 const { deriveMasterKey, generateSalt, verifyPassword } = require('../security/key-derivation');
 const { encryptJSON, decryptJSON } = require('../security/encryption');
-const { 
-  writeEncryptedJSON, 
-  readEncryptedJSON, 
+const {
+  writeEncryptedJSON,
+  readEncryptedJSON,
   fileExists,
-  getUserDataPath 
+  getUserDataPath
 } = require('../security/secure-storage');
 const { writeAuditLog } = require('../security/audit-log');
 const securityMonitor = require('./security-monitor');
@@ -32,19 +32,19 @@ const rateLimit = {
  */
 function checkRateLimit() {
   const now = Date.now();
-  
+
   // Reset if cooldown period has passed
   if (now - rateLimit.lastAttemptTime > rateLimit.cooldownPeriod) {
     rateLimit.passwordAttempts = 0;
   }
-  
+
   if (rateLimit.passwordAttempts >= rateLimit.maxAttempts) {
     return false;
   }
-  
+
   rateLimit.passwordAttempts++;
   rateLimit.lastAttemptTime = now;
-  
+
   return true;
 }
 
@@ -68,17 +68,17 @@ async function verifyPasswordAndGetKey(password) {
       securityMonitor.logFailedLogin();
       throw new Error('Too many failed attempts. Please wait 30 seconds.');
     }
-    
+
     // Read salt
     const userDataPath = getUserDataPath();
     const saltPath = path.join(userDataPath, '.salt.dat');
-    
+
     const saltData = await fs.readFile(saltPath);
     const salt = Buffer.from(saltData);
-    
+
     // Derive key
     const key = deriveMasterKey(password, salt);
-    
+
     // Verify by attempting to read config
     try {
       await readEncryptedJSON('.config.enc', key);
@@ -105,7 +105,7 @@ async function verifyPasswordAndGetKey(password) {
  */
 function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
   const { app } = require('electron');
-  
+
   // Verify password
   ipcMain.handle('verify-password', async (event, password) => {
     try {
@@ -119,7 +119,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Setup first-time password
   ipcMain.handle('setup-password', async (event, password) => {
     try {
@@ -127,15 +127,15 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (await fileExists('.salt.dat')) {
         return { success: false, error: 'Password already set up' };
       }
-      
+
       // Validate password
       if (!password || password.length < 12) {
         return { success: false, error: 'Password must be at least 12 characters' };
       }
-      
+
       const userDataPath = getUserDataPath();
       const saltPath = path.join(userDataPath, '.salt.dat');
-      
+
       // Ensure directories exist
       const { ensureDirectory } = require('../security/secure-storage');
       await ensureDirectory(userDataPath);
@@ -143,14 +143,14 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       await ensureDirectory(chatsDir);
       const auditDir = path.join(userDataPath, 'audit');
       await ensureDirectory(auditDir);
-      
+
       // Generate salt
       const salt = generateSalt();
       await fs.writeFile(saltPath, salt);
-      
+
       // Derive key
       const key = deriveMasterKey(password, salt);
-      
+
       // Create initial config
       const initialConfig = {
         accounts: [],
@@ -161,26 +161,26 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           autoBlur: false
         }
       };
-      
+
       await writeEncryptedJSON('.config.enc', initialConfig, key);
-      
+
       setSessionKey(key);
       securityMonitor.logSuccessfulAuth();
-      
+
       return { success: true };
     } catch (error) {
       securityMonitor.logError(error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get session key status and check if setup is needed
   ipcMain.handle('get-session-status', async () => {
     const key = getSessionKey();
     const needsSetup = !(await fileExists('.salt.dat'));
     return { authenticated: key !== null, needsSetup };
   });
-  
+
   // Save chat
   ipcMain.handle('save-chat', async (event, chatId, chatData) => {
     try {
@@ -188,7 +188,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
-      
+
       // Handle both old format (array of messages) and new format (object with messages and context)
       let dataToSave;
       if (Array.isArray(chatData)) {
@@ -204,17 +204,17 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           context: chatData.context || null
         };
       }
-      
+
       const chatPath = path.join('chats', `${chatId}.enc`);
       await writeEncryptedJSON(chatPath, dataToSave, key);
-      
+
       return { success: true };
     } catch (error) {
       securityMonitor.logError(error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Load chat
   ipcMain.handle('load-chat', async (event, chatId) => {
     try {
@@ -222,22 +222,22 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
-      
+
       const chatPath = path.join('chats', `${chatId}.enc`);
       const data = await readEncryptedJSON(chatPath, key);
-      
+
       // Handle backward compatibility - if data is array, wrap it
       if (Array.isArray(data)) {
         return { success: true, data: { messages: data, context: null } };
       }
-      
+
       // New format with context
       return { success: true, data: data || { messages: [], context: null } };
     } catch (error) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Delete chat
   ipcMain.handle('delete-chat', async (event, chatId) => {
     try {
@@ -245,23 +245,23 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
-      
+
       const { secureDelete } = require('../security/secure-storage');
       const userDataPath = getUserDataPath();
       const chatPath = path.join(userDataPath, 'chats', `${chatId}.enc`);
-      
+
       // Delete the chat file
       if (await fileExists(chatPath)) {
         await secureDelete(chatPath);
       }
-      
+
       return { success: true };
     } catch (error) {
       securityMonitor.logError(error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // List chats with metadata
   ipcMain.handle('list-chats', async () => {
     try {
@@ -269,10 +269,10 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
-      
+
       const userDataPath = getUserDataPath();
       const chatsDir = path.join(userDataPath, 'chats');
-      
+
       // Ensure chats directory exists
       try {
         await fs.access(chatsDir);
@@ -281,28 +281,28 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         const { ensureDirectory } = require('../security/secure-storage');
         await ensureDirectory(chatsDir);
       }
-      
+
       try {
         const files = await fs.readdir(chatsDir);
         const chatFiles = files.filter(f => f.endsWith('.enc') && f !== '.manifest.enc');
-        
+
         // Get metadata for each chat
         const chats = await Promise.all(
           chatFiles.map(async (file) => {
             const chatId = file.replace('.enc', '');
             const chatPath = path.join(chatsDir, file);
-            
+
             try {
               // Get file stats for date
               const stats = await fs.stat(chatPath);
-              
+
               // Try to load chat to get preview and context
               const chatData = await readEncryptedJSON(path.join('chats', file), key);
               // Handle both old format (array) and new format (object)
               const messages = Array.isArray(chatData) ? chatData : (chatData?.messages || []);
               const context = Array.isArray(chatData) ? null : (chatData?.context || null);
               const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
-              
+
               return {
                 id: chatId,
                 name: chatId === 'default' ? 'Default Chat' : chatId,
@@ -324,10 +324,10 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
             }
           })
         );
-        
+
         // Sort by date (newest first)
         chats.sort((a, b) => b.date - a.date);
-        
+
         return { success: true, chats };
       } catch (error) {
         // Return empty array if error
@@ -337,7 +337,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get config
   ipcMain.handle('get-config', async () => {
     try {
@@ -345,14 +345,14 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
-      
+
       const config = await readEncryptedJSON('.config.enc', key);
       return { success: true, data: config || { accounts: [], settings: {} } };
     } catch (error) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Save config
   ipcMain.handle('save-config', async (event, config) => {
     try {
@@ -360,7 +360,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
-      
+
       await writeEncryptedJSON('.config.enc', config, key);
       return { success: true };
     } catch (error) {
@@ -368,7 +368,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Send message to AI (proxy through main process for security)
   ipcMain.handle('send-ai-message', async (event, providerConfig, messages) => {
     try {
@@ -376,13 +376,13 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
-      
+
       // Load provider modules
       const OpenAIProvider = require('../providers/openai');
       const OllamaProvider = require('../providers/ollama');
       const OpenAICompatibleProvider = require('../providers/openai-compatible');
       const GroqProvider = require('../providers/groq');
-      
+
       let provider;
       switch (providerConfig.type) {
         case 'openai':
@@ -400,16 +400,16 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         default:
           return { success: false, error: `Unknown provider type: ${providerConfig.type}` };
       }
-      
+
       // Send message with streaming
       let fullContent = '';
       const chunks = [];
-      
+
       await provider.streamMessage(messages, {}, (chunk) => {
         fullContent += chunk;
         chunks.push(chunk);
       });
-      
+
       return {
         success: true,
         content: fullContent,
@@ -424,29 +424,29 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         model: providerConfig?.model,
         hasApiKey: !!providerConfig?.apiKey
       };
-      
+
       // If it's an axios error, include response details (safely)
       if (error.response) {
         errorDetails.status = error.response.status;
         errorDetails.statusText = error.response.statusText;
-        
+
         // Safely extract response data
         try {
           if (error.response.data) {
             let responseData = error.response.data;
-            
+
             // Handle stream responses - extract from buffer
             if (responseData && typeof responseData === 'object' && responseData._readableState) {
               try {
                 const bufferData = responseData._readableState?.buffer?.head?.data;
                 let bufferArray = null;
-                
+
                 if (bufferData?.data && Array.isArray(bufferData.data)) {
                   bufferArray = bufferData.data;
                 } else if (Buffer.isBuffer(bufferData)) {
                   bufferArray = Array.from(bufferData);
                 }
-                
+
                 if (bufferArray && bufferArray.length > 0) {
                   const maxBytes = Math.min(bufferArray.length, 1000);
                   let errorStr = '';
@@ -466,7 +466,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
                 responseData = '[Unable to parse stream response]';
               }
             }
-            
+
             // Only include simple data types, avoid circular refs
             if (typeof responseData === 'string') {
               errorDetails.responseData = responseData;
@@ -491,16 +491,16 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           errorDetails.responseData = '[Unable to extract response data]';
         }
       }
-      
+
       // Always return a response to prevent "reply was never sent" error
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message || 'Unknown error',
         details: errorDetails
       };
     }
   });
-  
+
   // Send message to AI with real-time streaming via IPC events
   ipcMain.handle('send-ai-message-stream', async (event, providerConfig, messages, channel) => {
     try {
@@ -508,13 +508,13 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       if (!key) {
         return { success: false, error: 'Not authenticated' };
       }
-      
+
       // Load provider modules
       const OpenAIProvider = require('../providers/openai');
       const OllamaProvider = require('../providers/ollama');
       const OpenAICompatibleProvider = require('../providers/openai-compatible');
       const GroqProvider = require('../providers/groq');
-      
+
       let provider;
       switch (providerConfig.type) {
         case 'openai':
@@ -532,16 +532,16 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         default:
           return { success: false, error: `Unknown provider type: ${providerConfig.type}` };
       }
-      
+
       // Stream message and send chunks via IPC events
       await provider.streamMessage(messages, {}, (chunk) => {
         // Send chunk to renderer via IPC event
         event.sender.send(channel, chunk);
       });
-      
+
       // Send done signal
       event.sender.send(channel, '[DONE]');
-      
+
       return { success: true };
     } catch (error) {
       // Send error via channel
@@ -551,13 +551,13 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Lock session (clear session key)
   ipcMain.handle('lock-session', async () => {
     setSessionKey(null);
     return { success: true };
   });
-  
+
   // Toggle always on top (but always enforce it stays on top)
   ipcMain.handle('toggle-always-on-top', async () => {
     try {
@@ -568,7 +568,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         if (!mainWindow.isAlwaysOnTop()) {
           mainWindow.setAlwaysOnTop(true);
         }
-        
+
         // Bring window to front
         if (mainWindow.isMinimized()) {
           mainWindow.restore();
@@ -579,7 +579,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         mainWindow.focus();
         // Re-apply always-on-top to ensure it's active
         mainWindow.setAlwaysOnTop(true);
-        
+
         return { success: true, alwaysOnTop: true };
       }
       return { success: false, error: 'Main window not available' };
@@ -587,7 +587,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Bring window to front
   ipcMain.handle('bring-window-to-front', async () => {
     try {
@@ -596,20 +596,20 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         if (!mainWindow.isAlwaysOnTop()) {
           mainWindow.setAlwaysOnTop(true);
         }
-        
+
         if (mainWindow.isMinimized()) {
           mainWindow.restore();
         }
-        
+
         // Show and focus the window
         if (!mainWindow.isVisible()) {
           mainWindow.show();
         }
         mainWindow.focus();
-        
+
         // Re-apply always-on-top to ensure it stays active
         mainWindow.setAlwaysOnTop(true);
-        
+
         return { success: true };
       }
       return { success: false, error: 'Main window not available' };
@@ -617,7 +617,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get always on top status
   ipcMain.handle('get-always-on-top', async () => {
     try {
@@ -629,7 +629,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Transcribe audio using OpenAI Whisper API or Groq Whisper
   ipcMain.handle('transcribe-audio', async (event, audioData, apiKey, providerType = 'openai', model = 'whisper-1') => {
     try {
@@ -638,15 +638,15 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       const fs = require('fs');
       const path = require('path');
       const { app } = require('electron');
-      
+
       if (!apiKey) {
         return { success: false, error: 'API key required for Whisper transcription' };
       }
-      
+
       // Save audio data to temp file
       const tempDir = app.getPath('temp');
       let tempFile = path.join(tempDir, `audio-${Date.now()}.webm`);
-      
+
       // audioData can be Buffer, Uint8Array, or ArrayBuffer from renderer
       let audioBuffer;
       if (Buffer.isBuffer(audioData)) {
@@ -657,46 +657,49 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       } else if (audioData instanceof ArrayBuffer) {
         // Convert ArrayBuffer to Buffer
         audioBuffer = Buffer.from(audioData);
+      } else if (Array.isArray(audioData)) {
+        // Convert standard Array (from Array.from(uint8Array)) to Buffer
+        audioBuffer = Buffer.from(audioData);
       } else if (typeof audioData === 'string') {
         // Assume it's a file path
         tempFile = audioData;
       } else {
-        return { success: false, error: 'Invalid audio data format. Expected Buffer, Uint8Array, or ArrayBuffer.' };
+        return { success: false, error: 'Invalid audio data format. Expected Buffer, Uint8Array, ArrayBuffer, or Array.' };
       }
-      
+
       // Write audio buffer to file if not using file path
       if (audioBuffer) {
         fs.writeFileSync(tempFile, audioBuffer);
       }
-      
+
       // Verify file exists and has content
       if (!fs.existsSync(tempFile)) {
         return { success: false, error: 'Audio file not created' };
       }
-      
+
       const stats = fs.statSync(tempFile);
       if (stats.size === 0) {
         fs.unlinkSync(tempFile);
         return { success: false, error: 'Audio file is empty' };
       }
-      
+
       let transcriptionText = '';
-      
+
       // Log transcription start
       securityMonitor.logInfo(`Starting audio transcription: provider=${providerType}, model=${model}, fileSize=${stats.size} bytes`);
-      
+
       if (providerType === 'groq') {
         // Use Groq SDK for transcription (as per user's code example)
         const Groq = require('groq-sdk');
         const groq = new Groq({ apiKey });
-        
+
         // Groq Whisper models
         const groqWhisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo'];
         const whisperModel = (model && groqWhisperModels.includes(model)) ? model : 'whisper-large-v3-turbo';
-        
+
         securityMonitor.logInfo(`Calling Groq Whisper API: model=${whisperModel}`);
         const apiStartTime = Date.now();
-        
+
         try {
           const transcription = await groq.audio.transcriptions.create({
             file: fs.createReadStream(tempFile),
@@ -704,10 +707,10 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
             temperature: 0,
             response_format: 'text'
           });
-          
+
           const apiDuration = Date.now() - apiStartTime;
           securityMonitor.logInfo(`Groq Whisper API response received in ${apiDuration}ms`);
-          
+
           // Groq SDK returns text directly when response_format is 'text'
           // If it's an object, extract the text property
           if (typeof transcription === 'string') {
@@ -717,7 +720,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           } else {
             transcriptionText = String(transcription);
           }
-          
+
           securityMonitor.logInfo(`Groq transcription successful: textLength=${transcriptionText.length} chars, duration=${apiDuration}ms`);
         } catch (groqError) {
           const apiDuration = Date.now() - apiStartTime;
@@ -729,26 +732,26 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           } catch (e) {
             console.error('Failed to delete temp audio file:', e);
           }
-          
+
           let errorMessage = groqError.message || 'Unknown Groq transcription error';
           if (groqError.response && groqError.response.data) {
             errorMessage = groqError.response.data.error?.message || errorMessage;
           }
-          
+
           securityMonitor.logError(new Error(`Groq transcription failed after ${apiDuration}ms: ${errorMessage}`), {
             provider: 'groq',
             model: whisperModel,
             duration: apiDuration,
             error: errorMessage
           });
-          
+
           return { success: false, error: errorMessage };
         }
       } else {
         // Use OpenAI API (axios for compatibility)
         securityMonitor.logInfo(`Calling OpenAI Whisper API: model=${model || 'whisper-1'}`);
         const apiStartTime = Date.now();
-        
+
         const form = new FormData();
         form.append('file', fs.createReadStream(tempFile), {
           filename: 'audio.webm',
@@ -756,7 +759,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         });
         form.append('model', 'whisper-1');
         form.append('language', 'en');
-        
+
         try {
           const response = await axios.post(
             'https://api.openai.com/v1/audio/transcriptions',
@@ -771,26 +774,26 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
               maxBodyLength: Infinity
             }
           );
-          
+
           const apiDuration = Date.now() - apiStartTime;
           transcriptionText = response.data.text;
-          
+
           securityMonitor.logInfo(`OpenAI transcription successful: textLength=${transcriptionText.length} chars, duration=${apiDuration}ms`);
         } catch (openaiError) {
           const apiDuration = Date.now() - apiStartTime;
           let errorMessage = openaiError.message || 'Unknown OpenAI transcription error';
-          
+
           if (openaiError.response && openaiError.response.data) {
             errorMessage = openaiError.response.data.error?.message || errorMessage;
           }
-          
+
           securityMonitor.logError(new Error(`OpenAI transcription failed after ${apiDuration}ms: ${errorMessage}`), {
             provider: 'openai',
             model: model || 'whisper-1',
             duration: apiDuration,
             error: errorMessage
           });
-          
+
           // Clean up temp file on error
           try {
             if (fs.existsSync(tempFile)) {
@@ -799,11 +802,11 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           } catch (e) {
             console.error('Failed to delete temp audio file:', e);
           }
-          
+
           return { success: false, error: errorMessage };
         }
       }
-      
+
       // Clean up temp file
       try {
         if (fs.existsSync(tempFile)) {
@@ -815,7 +818,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         console.error('Failed to cleanup temp file:', e);
         securityMonitor.logError(new Error(`Failed to cleanup temp file: ${e.message}`));
       }
-      
+
       if (transcriptionText) {
         securityMonitor.logInfo(`Transcription completed successfully: ${transcriptionText.length} characters`);
         return {
@@ -838,27 +841,27 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       } catch (e) {
         // Ignore
       }
-      
+
       let errorMessage = 'Transcription failed';
       if (error.response) {
         errorMessage = error.response.data?.error?.message || error.response.statusText || errorMessage;
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       return {
         success: false,
         error: errorMessage
       };
     }
   });
-  
+
   // Quit app
   ipcMain.handle('quit-app', async () => {
     app.quit();
     return { success: true };
   });
-  
+
   // Get desktop sources for screen/audio capture
   ipcMain.handle('get-desktop-sources', async (event, options = {}) => {
     try {
@@ -883,17 +886,17 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       };
     }
   });
-  
+
   // Create new browser window
   ipcMain.handle('create-browser-window', async (event, options = {}) => {
     try {
       const { BrowserWindow } = require('electron');
       const url = options.url || 'https://www.google.com';
       const incognito = options.incognito || false;
-      
+
       // Store partition name for cleanup
       const partitionName = incognito ? `persist:incognito-${Date.now()}` : 'persist:default';
-      
+
       // Create a new browser window
       const browserWindow = new BrowserWindow({
         width: 1000,
@@ -917,7 +920,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         titleBarStyle: 'default',
         icon: path.join(__dirname, '../../assets/icon.png')
       });
-      
+
       // Create HTML content for browser window
       const browserHTML = `
 <!DOCTYPE html>
@@ -1061,14 +1064,14 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
   </script>
 </body>
 </html>`;
-      
+
       // Load the HTML content
       browserWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(browserHTML)}`);
-      
+
       browserWindow.once('ready-to-show', () => {
         browserWindow.show();
       });
-      
+
       browserWindow.on('closed', () => {
         // Clean up incognito session if needed
         if (incognito) {
@@ -1083,7 +1086,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
           }
         }
       });
-      
+
       return { success: true, windowId: browserWindow.id };
     } catch (error) {
       securityMonitor.logError(error);

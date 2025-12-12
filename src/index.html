@@ -1762,6 +1762,20 @@
   <!-- End Main Content Area -->
   
   <script src="./renderer/ui/voice-assistant.js"></script>
+  <script>
+    // Shim to bridge renderer-bundle.js expectations with voice-assistant.js
+    window.initializeVoiceAssistant = function(chatUI) {
+      console.log('Shim: initializeVoiceAssistant called');
+      if (window.voiceAssistant) {
+        window.voiceAssistant.initialize(chatUI);
+      } else if (window.VoiceAssistant) {
+        window.voiceAssistant = new window.VoiceAssistant();
+        window.voiceAssistant.initialize(chatUI);
+      } else {
+        console.error('Shim: VoiceAssistant class not found');
+      }
+    };
+  </script>
  
   <!-- Define modal functions immediately so they're available when renderer-bundle.js loads -->
   <script>
