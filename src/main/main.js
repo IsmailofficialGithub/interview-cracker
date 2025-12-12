@@ -86,10 +86,10 @@ function createWindow() {
       mainWindow.focus();
 
       // Open DevTools in development (F12 or Ctrl+Shift+I)
-      if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
-        // Open DevTools automatically in dev mode
-        mainWindow.webContents.openDevTools();
-      }
+      // if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
+      //   // Open DevTools automatically in dev mode
+      //   mainWindow.webContents.openDevTools();
+      // }
     }
   });
   // Keyboard shortcut to toggle DevTools (F12 or Ctrl+Shift+I)
