@@ -51,16 +51,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return new Promise((resolve, reject) => {
       const channel = `ai-stream-${Date.now()}`;
       let fullContent = '';
+      let hasError = false;
       
       // Listen for chunks
       const chunkHandler = (event, chunk) => {
+        // Check for error chunks
+        if (typeof chunk === 'string' && chunk.startsWith('[ERROR]')) {
+          const errorMsg = chunk.substring(7);
+          ipcRenderer.removeListener(channel, chunkHandler);
+          hasError = true;
+          reject(new Error(errorMsg));
+          return;
+        }
+        
         if (chunk === '[DONE]') {
           ipcRenderer.removeListener(channel, chunkHandler);
-          resolve({ success: true, content: fullContent });
-        } else {
+          if (!hasError) {
+            resolve({ success: true, content: fullContent });
+          }
+        } else if (!hasError) {
+          // Only accumulate content if no error
           fullContent += chunk;
           if (onChunk) {
-            onChunk(chunk);
+            try {
+              onChunk(chunk);
+            } catch (callbackError) {
+              // If callback throws, we still want to handle it
+              console.error('Error in onChunk callback:', callbackError);
+              // Don't reject here, let the stream continue
+            }
           }
         }
       };
@@ -71,11 +90,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('send-ai-message-stream', providerConfig, messages, channel).then(result => {
         if (!result.success) {
           ipcRenderer.removeListener(channel, chunkHandler);
-          reject(new Error(result.error || 'Streaming failed'));
+          if (!hasError) {
+            reject(new Error(result.error || 'Streaming failed'));
+          }
         }
       }).catch(error => {
         ipcRenderer.removeListener(channel, chunkHandler);
-        reject(error);
+        if (!hasError) {
+          reject(error);
+        }
       });
     });
   },
