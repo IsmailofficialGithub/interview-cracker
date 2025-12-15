@@ -2238,6 +2238,11 @@
       if (nextBtn) {
         nextBtn.textContent = currentStep === totalSteps ? 'Finish' : 'Next';
       }
+
+      const backBtn = document.getElementById('onboarding-back');
+      if (backBtn) {
+        backBtn.style.display = currentStep > 1 ? 'inline-block' : 'none';
+      }
     }
 
     function checkOnboarding() {
@@ -2252,6 +2257,13 @@
 
     document.getElementById('onboarding-skip')?.addEventListener('click', () => {
       hideOnboarding();
+    });
+
+    document.getElementById('onboarding-back')?.addEventListener('click', () => {
+      if (currentStep > 1) {
+        currentStep--;
+        updateOnboardingStep();
+      }
     });
 
     document.getElementById('onboarding-next')?.addEventListener('click', () => {
