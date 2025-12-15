@@ -1808,6 +1808,28 @@
 
       <!-- Step 3 -->
       <div id="onboarding-step-3" class="onboarding-step" data-step="3">
+        <h2>👻 Stealth & Tools</h2>
+        <div style="margin: 20px 0; display: grid; gap: 16px;">
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #4a9eff;">Ghost Typer <i data-feather="type" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">
+              Press <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+V</code> to human-type
+              your clipboard content.
+              <br><small>(Configurable WPM & stops with ESC)</small>
+            </p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #ff9e4a;">Stealth Mode <i data-feather="eye-off" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">
+              Press <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+H</code> to instantly
+              hide or show the app window.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div id="onboarding-step-4" class="onboarding-step" data-step="4">
         <h2>🎤 Voice Modes</h2>
         <p>Supercharge your workflow with voice integration:</p>
         <div style="margin: 20px 0; display: grid; gap: 16px;">
@@ -2179,7 +2201,7 @@
 
     // Onboarding Logic
     let currentStep = 1;
-    const totalSteps = 3;
+    const totalSteps = 4;
 
     function showOnboarding() {
       const modal = document.getElementById('onboarding-modal');
