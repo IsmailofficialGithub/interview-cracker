@@ -94,3 +94,5 @@ pip-log.txt
 .tox/
 .mypy_cache/
 .pytest_cache/
+
+.cache/
