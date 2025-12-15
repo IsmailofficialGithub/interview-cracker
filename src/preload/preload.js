@@ -145,7 +145,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateShortcut: (shortcut) => ipcRenderer.invoke('update-shortcut', shortcut),
   updateGhostShortcut: (shortcut) => ipcRenderer.invoke('update-ghost-shortcut', shortcut),
   updateQuitShortcut: (shortcut) => ipcRenderer.invoke('update-quit-shortcut', shortcut),
-  updateGhostWpm: (wpm) => ipcRenderer.invoke('update-ghost-wpm', wpm)
+  updateGhostWpm: (wpm) => ipcRenderer.invoke('update-ghost-wpm', wpm),
+  updateGhostMistakeChance: (chance) => ipcRenderer.invoke('update-ghost-mistake-chance', chance),
+  updateGhostMaxMistakes: (max) => ipcRenderer.invoke('update-ghost-max-mistakes', max)
 });
 
 // Log that preload script loaded (for debugging)
