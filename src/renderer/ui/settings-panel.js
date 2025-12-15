@@ -9,7 +9,7 @@ class SettingsPanel {
     this.isOpen = false;
     this.config = null;
   }
-  
+
   /**
    * Initialize settings panel
    */
@@ -17,7 +17,7 @@ class SettingsPanel {
     await this.loadConfig();
     this.setupUI();
   }
-  
+
   /**
    * Load configuration
    */
@@ -34,7 +34,7 @@ class SettingsPanel {
       this.config = { accounts: [], settings: {} };
     }
   }
-  
+
   /**
    * Setup UI
    */
@@ -42,13 +42,13 @@ class SettingsPanel {
     // Settings button click handler (will be set by renderer)
     // This class provides the panel HTML and logic
   }
-  
+
   /**
    * Show settings panel
    */
   show() {
     if (this.isOpen) return;
-    
+
     const panelHTML = `
       <div id="settings-panel" class="settings-panel-overlay">
         <div class="settings-panel-content">
@@ -64,32 +64,32 @@ class SettingsPanel {
         </div>
       </div>
     `;
-    
+
     document.body.insertAdjacentHTML('beforeend', panelHTML);
     this.panel = document.getElementById('settings-panel');
     this.isOpen = true;
-    
+
     // Close button
     document.getElementById('settings-close').addEventListener('click', () => {
       this.hide();
     });
-    
+
     // Close on overlay click
     this.panel.addEventListener('click', (e) => {
       if (e.target === this.panel) {
         this.hide();
       }
     });
-    
+
     // Setup form handlers
     this.setupFormHandlers();
-    
+
     // Initialize icons
     if (typeof feather !== 'undefined') {
       feather.replace();
     }
   }
-  
+
   /**
    * Hide settings panel
    */
@@ -100,7 +100,7 @@ class SettingsPanel {
       this.isOpen = false;
     }
   }
-  
+
   /**
    * Render settings content
    */
@@ -125,13 +125,13 @@ class SettingsPanel {
       </div>
     `;
   }
-  
+
   /**
    * Render accounts tab
    */
   renderAccountsTab() {
     const accounts = this.config.accounts || [];
-    
+
     let html = `
       <div class="accounts-list">
         ${accounts.map((acc, idx) => `
@@ -191,16 +191,16 @@ class SettingsPanel {
         </form>
       </div>
     `;
-    
+
     return html;
   }
-  
+
   /**
    * Render privacy tab
    */
   renderPrivacyTab() {
     const settings = this.config.settings || {};
-    
+
     return `
       <div class="settings-section">
         <h3>Auto-Lock</h3>
@@ -233,13 +233,36 @@ class SettingsPanel {
           </label>
         </div>
       </div>
+
+      <div class="settings-section">
+        <h3>Shortcuts</h3>
+        <div class="setting-item">
+          <label>
+            Hide/Show App Shortcut:
+            <input type="text" id="hide-shortcut" value="${settings.hideShortcut || 'Ctrl+Alt+H'}" placeholder="e.g. Ctrl+Alt+H" />
+          </label>
+        </div>
+        <div class="setting-item">
+          <label>
+            Ghost Type Shortcut (Simulate Human Typing):
+            <input type="text" id="ghost-shortcut" value="${settings.ghostShortcut || 'Ctrl+Alt+V'}" placeholder="e.g. Ctrl+Alt+V" />
+          </label>
+        </div>
+        <div class="setting-item" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+           <label style="display: block; margin-bottom: 5px;">Typing Speed (WPM):</label>
+           <div style="display: flex; align-items: center; gap: 10px;">
+             <input type="number" id="ghost-wpm" value="${settings.ghostWpm || 60}" min="10" max="200" style="width: 80px;" />
+             <small style="color: #888;">(Higher is faster)</small>
+           </div>
+        </div>
+      </div>
       
       <div class="settings-actions">
         <button id="save-privacy-settings" class="save-btn">Save Settings</button>
       </div>
     `;
   }
-  
+
   /**
    * Render general tab
    */
@@ -252,7 +275,7 @@ class SettingsPanel {
       </div>
     `;
   }
-  
+
   /**
    * Setup form handlers
    */
@@ -261,11 +284,11 @@ class SettingsPanel {
     document.querySelectorAll('.settings-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         const tabName = tab.dataset.tab;
-        
+
         // Update active tab
         document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
-        
+
         // Show corresponding content
         document.querySelectorAll('.settings-tab-content').forEach(content => {
           content.style.display = 'none';
@@ -273,7 +296,7 @@ class SettingsPanel {
         document.getElementById(`${tabName}-tab`).style.display = 'block';
       });
     });
-    
+
     // Provider type change
     const accountType = document.getElementById('account-type');
     if (accountType) {
@@ -281,7 +304,7 @@ class SettingsPanel {
         const type = accountType.value;
         const apiKeyGroup = document.getElementById('api-key-group');
         const baseUrlGroup = document.getElementById('base-url-group');
-        
+
         if (type === 'ollama') {
           apiKeyGroup.style.display = 'none';
           baseUrlGroup.style.display = 'block';
@@ -295,7 +318,7 @@ class SettingsPanel {
         }
       });
     }
-    
+
     // Add account button
     const addAccountBtn = document.getElementById('add-account-btn');
     if (addAccountBtn) {
@@ -304,7 +327,7 @@ class SettingsPanel {
         document.getElementById('account-index').value = '-1';
       });
     }
-    
+
     // Cancel account form
     const cancelBtn = document.getElementById('cancel-account-form');
     if (cancelBtn) {
@@ -312,7 +335,7 @@ class SettingsPanel {
         document.getElementById('account-form').style.display = 'none';
       });
     }
-    
+
     // Account form submit (will be handled by save handler)
     const accountForm = document.getElementById('account-form-content');
     if (accountForm) {
@@ -321,7 +344,7 @@ class SettingsPanel {
         await this.saveAccount();
       });
     }
-    
+
     // Save privacy settings
     const savePrivacyBtn = document.getElementById('save-privacy-settings');
     if (savePrivacyBtn) {
@@ -330,7 +353,7 @@ class SettingsPanel {
       });
     }
   }
-  
+
   /**
    * Save account
    */
@@ -343,22 +366,22 @@ class SettingsPanel {
       apiKey: document.getElementById('account-api-key').value || '',
       baseURL: document.getElementById('account-base-url').value || undefined
     };
-    
+
     if (!this.config.accounts) {
       this.config.accounts = [];
     }
-    
+
     if (index >= 0) {
       this.config.accounts[index] = account;
     } else {
       this.config.accounts.push(account);
     }
-    
+
     await this.saveConfig();
     this.hide();
     this.show(); // Refresh
   }
-  
+
   /**
    * Save privacy settings
    */
@@ -366,16 +389,47 @@ class SettingsPanel {
     if (!this.config.settings) {
       this.config.settings = {};
     }
-    
+
     this.config.settings.autoLock = document.getElementById('auto-lock').checked;
     this.config.settings.autoLockMinutes = parseInt(document.getElementById('auto-lock-minutes').value);
     this.config.settings.autoBlur = document.getElementById('auto-blur').checked;
     this.config.settings.messageRetentionDays = parseInt(document.getElementById('message-retention').value);
-    
+
+    // Save shortcuts
+    const shortcutInput = document.getElementById('hide-shortcut');
+    if (shortcutInput) {
+      const newShortcut = shortcutInput.value.trim();
+      if (newShortcut && this.config.settings.hideShortcut !== newShortcut) {
+        this.config.settings.hideShortcut = newShortcut;
+        // Update main process
+        await window.electronAPI.updateShortcut(newShortcut);
+      }
+    }
+
+    const ghostShortcutInput = document.getElementById('ghost-shortcut');
+    if (ghostShortcutInput) {
+      const newGhostShortcut = ghostShortcutInput.value.trim();
+      if (newGhostShortcut && this.config.settings.ghostShortcut !== newGhostShortcut) {
+        this.config.settings.ghostShortcut = newGhostShortcut;
+        await window.electronAPI.updateGhostShortcut(newGhostShortcut);
+      }
+    }
+
+    const ghostWpmInput = document.getElementById('ghost-wpm');
+    if (ghostWpmInput) {
+      const newGhostWpm = parseInt(ghostWpmInput.value);
+      if (newGhostWpm && this.config.settings.ghostWpm !== newGhostWpm) {
+        this.config.settings.ghostWpm = newGhostWpm;
+        await window.electronAPI.updateGhostWpm(newGhostWpm);
+      }
+    }
+
     await this.saveConfig();
     alert('Settings saved');
   }
-  
+
+
+
   /**
    * Save configuration
    */

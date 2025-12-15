@@ -3,12 +3,13 @@
  * Application entry point and window management
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
 const path = require('path');
 const windowManager = require('./window-manager');
 const systemTray = require('./system-tray');
 const ipcHandlers = require('./ipc-handlers');
 const securityMonitor = require('./security-monitor');
+const ghostTyper = require('./ghost-typer');
 
 // Security: Disable remote module
 app.allowRendererProcessReuse = true;
@@ -16,6 +17,9 @@ app.allowRendererProcessReuse = true;
 let mainWindow = null;
 let sessionKey = null; // Encrypted session key (memory only)
 let savedBounds = null; // Store window position/size when hidden
+let currentShortcut = 'Ctrl+Alt+H'; // Hide shortcut
+let ghostTypeShortcut = 'Ctrl+Alt+V'; // Ghost Type shortcut
+let ghostWpm = 60; // Ghost WPM
 
 /**
  * Create main application window
@@ -39,8 +43,9 @@ function createWindow() {
       webviewTag: true, // Enable webview tag for in-built browser
     },
     show: false, // Don't show until ready
-    frame: true,
-    titleBarStyle: 'default',
+    frame: false, // Frameless window
+    titleBarStyle: 'hidden', // Hide title bar
+    skipTaskbar: true, // Hide from taskbar
     icon: path.join(__dirname, '../../assets/icon.png') // Will be set if exists
   });
 
@@ -136,13 +141,13 @@ function createWindow() {
   mainWindow.on('focus', () => {
     if (mainWindow) {
       mainWindow.webContents.send('window-focused');
-
       // Ensure always-on-top is enabled when window gains focus
-      if (!mainWindow.isAlwaysOnTop()) {
-        mainWindow.setAlwaysOnTop(true);
-      }
+      mainWindow.setAlwaysOnTop(true, 'screen-saver');
     }
   });
+
+  // Register Global Shortcut
+  registerGlobalShortcut();
 
   // Security: Prevent navigation to external URLs
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
@@ -323,5 +328,75 @@ process.on('unhandledRejection', (reason, promise) => {
       timestamp: new Date().toISOString()
     });
   }
+});
+
+// Function to register global shortcut
+// Function to register global shortcuts
+function registerGlobalShortcut() {
+  globalShortcut.unregisterAll();
+
+  try {
+    // Hide/Show Shortcut
+    const ret = globalShortcut.register(currentShortcut, () => {
+      if (mainWindow) {
+        if (mainWindow.isVisible()) {
+          mainWindow.hide();
+        } else {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    });
+
+    if (!ret) {
+      console.error('Registration failed for shortcut:', currentShortcut);
+    } else {
+      console.log('Global shortcut registered:', currentShortcut);
+    }
+
+    // Ghost Type Shortcut
+    const retGhost = globalShortcut.register(ghostTypeShortcut, () => {
+      ghostTyper.typeClipboard(ghostWpm);
+    });
+
+    if (!retGhost) {
+      console.error('Registration failed for ghost shortcut:', ghostTypeShortcut);
+    } else {
+      console.log('Ghost Type shortcut registered:', ghostTypeShortcut);
+    }
+
+  } catch (error) {
+    console.error('Error registering shortcuts:', error);
+  }
+}
+
+// IPC to update shortcuts from renderer
+ipcMain.handle('update-shortcut', async (event, newShortcut) => {
+  if (!newShortcut) return false;
+  currentShortcut = newShortcut;
+  registerGlobalShortcut();
+  return true;
+});
+
+ipcMain.handle('update-ghost-shortcut', async (event, newShortcut) => {
+  if (!newShortcut) return false;
+  ghostTypeShortcut = newShortcut;
+  registerGlobalShortcut();
+  return true;
+});
+
+ipcMain.handle('update-ghost-wpm', async (event, wpm) => {
+  const newWpm = parseInt(wpm);
+  if (!isNaN(newWpm) && newWpm > 0) {
+    ghostWpm = newWpm;
+    return true;
+  }
+  return false;
+});
+
+// Clean up shortcuts
+app.on('will-quit', () => {
+  // Unregister all shortcuts.
+  globalShortcut.unregisterAll();
 });
 

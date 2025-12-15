@@ -44,6 +44,11 @@ class VoiceAssistant {
     this.onTranscription = null;
     this.onResponse = null;
     this.onError = null;
+
+    // Internal state for debouncing/throttling
+    this.isToggling = false;
+    this.lastErrorTime = 0;
+    this.lastErrorMessage = '';
   }
 
   /**
@@ -431,13 +436,30 @@ class VoiceAssistant {
    * Toggle voice assistant on/off
    */
   async toggle() {
+    if (this.isToggling) {
+      console.log('Toggle ignored - already processing toggle');
+      return;
+    }
+
+    this.isToggling = true;
     console.log('Toggle called, isActive:', this.isActive, 'mode:', this.mode);
-    if (this.isActive) {
-      console.log('Stopping voice assistant...');
-      await this.stop();
-    } else {
-      console.log('Starting voice assistant...');
-      await this.start();
+
+    try {
+      if (this.isActive) {
+        console.log('Stopping voice assistant...');
+        await this.stop();
+      } else {
+        console.log('Starting voice assistant...');
+        await this.start();
+      }
+    } catch (error) {
+      console.error('Error during toggle:', error);
+      this.showError(`Toggle error: ${error.message}`);
+    } finally {
+      // Add a small delay before allowing another toggle to prevent double-clicks
+      setTimeout(() => {
+        this.isToggling = false;
+      }, 500);
     }
   }
 
@@ -1073,6 +1095,16 @@ class VoiceAssistant {
    * Show error message
    */
   showError(message) {
+    // Throttle error messages to prevent spam
+    const now = Date.now();
+    if (message === this.lastErrorMessage && now - this.lastErrorTime < 2000) {
+      console.log('Suppressing duplicate error:', message);
+      return;
+    }
+
+    this.lastErrorMessage = message;
+    this.lastErrorTime = now;
+
     console.error('Voice Assistant Error:', message);
 
     if (this.onError) {

@@ -1,18 +1,96 @@
-node_modules/
 dist/
+
+# Dependency directories
+node_modules/
+jspm_packages/
+web_modules/
+
+# Build artifacts
+build/
+dist/
+tmp/
 *.log
-.DS_Store
-*.enc
-*.encrypted
-.salt.dat
-userData/
-.env
-*.exe
+*.lock
+*.pid
+*.seed
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
 *.dmg
-*.AppImage
-.vscode/
+*.iso
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Tt]humbs.db
+
+# IDE and editor files
 .idea/
+.vscode/
+.vs/
+*.sublime-project
+*.sublime-workspace
 *.swp
 *.swo
 *~
+.#*
+*.bak
+*.orig
+*.rej
+.project
+.classpath
+.settings/
+.c9/
+*.iml
+*.iws
+*.ipr
+*.komodoproject
 
+# Environment variables
+.env
+.env.*
+.venv/
+venv/
+env/
+
+# Test/Coverage reports
+/coverage/
+.nyc_output/
+
+# Package manager files
+package-lock.json
+yarn.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Mac specific
+.AppleDouble
+.LSOverride
+
+# Windows specific
+$RECYCLE.BIN/
+System Volume Information/
+desktop.ini
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+.Python
+pip-log.txt
+.tox/
+.mypy_cache/
+.pytest_cache/

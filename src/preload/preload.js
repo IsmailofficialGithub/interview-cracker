@@ -31,20 +31,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setupPassword: (password) => ipcRenderer.invoke('setup-password', password),
   getSessionStatus: () => ipcRenderer.invoke('get-session-status'),
   lockSession: () => ipcRenderer.invoke('lock-session'),
-  
+
   // Chat operations
   saveChat: (chatId, messages) => ipcRenderer.invoke('save-chat', chatId, messages),
   loadChat: (chatId) => ipcRenderer.invoke('load-chat', chatId),
   listChats: () => ipcRenderer.invoke('list-chats'),
   deleteChat: (chatId) => ipcRenderer.invoke('delete-chat', chatId),
-  
+
   // Configuration
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
-  
+
   // AI message (proxied through main process)
   sendAIMessage: (providerConfig, messages) => ipcRenderer.invoke('send-ai-message', providerConfig, messages),
-  
+
   // AI message with streaming (returns chunks)
   sendAIMessageStream: async (providerConfig, messages, onChunk) => {
     // Use proper streaming via IPC
@@ -52,7 +52,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const channel = `ai-stream-${Date.now()}`;
       let fullContent = '';
       let hasError = false;
-      
+
       // Listen for chunks
       const chunkHandler = (event, chunk) => {
         // Check for error chunks
@@ -63,7 +63,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
           reject(new Error(errorMsg));
           return;
         }
-        
+
         if (chunk === '[DONE]') {
           ipcRenderer.removeListener(channel, chunkHandler);
           if (!hasError) {
@@ -83,9 +83,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
           }
         }
       };
-      
+
       ipcRenderer.on(channel, chunkHandler);
-      
+
       // Start streaming
       ipcRenderer.invoke('send-ai-message-stream', providerConfig, messages, channel).then(result => {
         if (!result.success) {
@@ -102,7 +102,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       });
     });
   },
-  
+
   // Window events
   onWindowBlur: (callback) => {
     ipcRenderer.on('window-blurred', callback);
@@ -112,7 +112,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('window-focused', callback);
     return () => ipcRenderer.removeListener('window-focused', callback);
   },
-  
+
   // Log events from main process
   onLogError: (callback) => {
     ipcRenderer.on('log-error', (event, logData) => {
@@ -120,26 +120,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     });
     return () => ipcRenderer.removeListener('log-error', callback);
   },
-  
+
   // Always on top controls
   toggleAlwaysOnTop: () => ipcRenderer.invoke('toggle-always-on-top'),
   getAlwaysOnTop: () => ipcRenderer.invoke('get-always-on-top'),
   bringWindowToFront: () => ipcRenderer.invoke('bring-window-to-front'),
-  
+
   // Voice transcription (OpenAI Whisper or Groq Whisper)
   transcribeAudio: (audioData, apiKey, providerType, model) => ipcRenderer.invoke('transcribe-audio', audioData, apiKey, providerType, model),
-  
+
   // Utility: Markdown renderer
   renderMarkdown: (text) => marked.parse(text),
-  
+
   // App control
   quitApp: () => ipcRenderer.invoke('quit-app'),
-  
+
   // Desktop capture
   getDesktopSources: (options) => ipcRenderer.invoke('get-desktop-sources', options),
-  
+
   // Browser windows
-  createBrowserWindow: (options) => ipcRenderer.invoke('create-browser-window', options)
+  createBrowserWindow: (options) => ipcRenderer.invoke('create-browser-window', options),
+
+  // Global Shortcut
+  updateShortcut: (shortcut) => ipcRenderer.invoke('update-shortcut', shortcut),
+  updateGhostShortcut: (shortcut) => ipcRenderer.invoke('update-ghost-shortcut', shortcut),
+  updateGhostWpm: (wpm) => ipcRenderer.invoke('update-ghost-wpm', wpm)
 });
 
 // Log that preload script loaded (for debugging)

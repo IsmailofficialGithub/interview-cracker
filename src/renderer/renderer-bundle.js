@@ -2506,6 +2506,35 @@
               Blur chat when window loses focus
             </label>
           </div>
+          <div class="setting-item" style="margin-bottom: 16px;">
+            <label>
+              Message retention (days, 0 = never delete):
+              <input type="number" id="message-retention" value="${settings.messageRetentionDays || 0}" min="0" style="margin-left: 8px; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 6px; border-radius: 4px; width: 60px;" />
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Shortcuts</h3>
+          <div class="setting-item" style="margin-bottom: 16px;">
+            <label style="display: block; margin-bottom: 8px;">
+              Hide/Show App Shortcut:
+            </label>
+             <input type="text" id="hide-shortcut" value="${settings.hideShortcut || 'Ctrl+Alt+H'}" placeholder="e.g. Ctrl+Alt+H" style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 6px;" />
+          </div>
+          <div class="setting-item" style="margin-bottom: 16px;">
+            <label style="display: block; margin-bottom: 8px;">
+              Ghost Type Shortcut (Simulate Human Typing):
+            </label>
+             <input type="text" id="ghost-shortcut" value="${settings.ghostShortcut || 'Ctrl+Alt+V'}" placeholder="e.g. Ctrl+Alt+V" style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 6px;" />
+          </div>
+          <div class="setting-item" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+             <label style="display: block; margin-bottom: 5px;">Typing Speed (WPM):</label>
+             <div style="display: flex; align-items: center; gap: 10px;">
+               <input type="number" id="ghost-wpm" value="${settings.ghostWpm || 60}" min="10" max="200" style="width: 80px; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 6px; border-radius: 6px;" />
+               <small style="color: #888;">(Higher is faster)</small>
+             </div>
+          </div>
         </div>
         
         <div class="settings-section">
@@ -2942,6 +2971,39 @@
       this.config.settings.autoLock = document.getElementById('auto-lock').checked;
       this.config.settings.autoLockMinutes = parseInt(document.getElementById('auto-lock-minutes').value);
       this.config.settings.autoBlur = document.getElementById('auto-blur').checked;
+
+      const retInput = document.getElementById('message-retention');
+      if (retInput) {
+        this.config.settings.messageRetentionDays = parseInt(retInput.value) || 0;
+      }
+
+      // Save shortcuts
+      const shortcutInput = document.getElementById('hide-shortcut');
+      if (shortcutInput) {
+        const newShortcut = shortcutInput.value.trim();
+        if (newShortcut && this.config.settings.hideShortcut !== newShortcut) {
+          this.config.settings.hideShortcut = newShortcut;
+          await window.electronAPI.updateShortcut(newShortcut);
+        }
+      }
+
+      const ghostShortcutInput = document.getElementById('ghost-shortcut');
+      if (ghostShortcutInput) {
+        const newGhostShortcut = ghostShortcutInput.value.trim();
+        if (newGhostShortcut && this.config.settings.ghostShortcut !== newGhostShortcut) {
+          this.config.settings.ghostShortcut = newGhostShortcut;
+          await window.electronAPI.updateGhostShortcut(newGhostShortcut);
+        }
+      }
+
+      const ghostWpmInput = document.getElementById('ghost-wpm');
+      if (ghostWpmInput) {
+        const newGhostWpm = parseInt(ghostWpmInput.value) || 60;
+        if (newGhostWpm && this.config.settings.ghostWpm !== newGhostWpm) {
+          this.config.settings.ghostWpm = newGhostWpm;
+          await window.electronAPI.updateGhostWpm(newGhostWpm);
+        }
+      }
 
       // Get always on top state
       const alwaysOnTopCheckbox = document.getElementById('always-on-top');
