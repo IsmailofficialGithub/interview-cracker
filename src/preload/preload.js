@@ -144,6 +144,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Global Shortcut
   updateShortcut: (shortcut) => ipcRenderer.invoke('update-shortcut', shortcut),
   updateGhostShortcut: (shortcut) => ipcRenderer.invoke('update-ghost-shortcut', shortcut),
+  updateQuitShortcut: (shortcut) => ipcRenderer.invoke('update-quit-shortcut', shortcut),
   updateGhostWpm: (wpm) => ipcRenderer.invoke('update-ghost-wpm', wpm)
 });
 

@@ -19,6 +19,7 @@ let sessionKey = null; // Encrypted session key (memory only)
 let savedBounds = null; // Store window position/size when hidden
 let currentShortcut = 'Ctrl+Alt+H'; // Hide shortcut
 let ghostTypeShortcut = 'Ctrl+Alt+V'; // Ghost Type shortcut
+let quitShortcut = 'Ctrl+Alt+Q'; // Quit shortcut
 let ghostWpm = 60; // Ghost WPM
 
 /**
@@ -365,6 +366,18 @@ function registerGlobalShortcut() {
       console.log('Ghost Type shortcut registered:', ghostTypeShortcut);
     }
 
+    // Quit Shortcut
+    const retQuit = globalShortcut.register(quitShortcut, () => {
+      console.log('Quit shortcut triggered, exiting...');
+      app.quit();
+    });
+
+    if (!retQuit) {
+      console.error('Registration failed for quit shortcut:', quitShortcut);
+    } else {
+      console.log('Quit shortcut registered:', quitShortcut);
+    }
+
   } catch (error) {
     console.error('Error registering shortcuts:', error);
   }
@@ -384,6 +397,15 @@ ipcMain.handle('update-ghost-shortcut', async (event, newShortcut) => {
   registerGlobalShortcut();
   return true;
 });
+
+ipcMain.handle('update-quit-shortcut', async (event, newShortcut) => {
+  if (!newShortcut) return false;
+  quitShortcut = newShortcut;
+  registerGlobalShortcut();
+  return true;
+});
+
+
 
 ipcMain.handle('update-ghost-wpm', async (event, wpm) => {
   const newWpm = parseInt(wpm);

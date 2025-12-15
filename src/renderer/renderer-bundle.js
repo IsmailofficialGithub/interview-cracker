@@ -2528,6 +2528,12 @@
             </label>
              <input type="text" id="ghost-shortcut" value="${settings.ghostShortcut || 'Ctrl+Alt+V'}" placeholder="e.g. Ctrl+Alt+V" style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 6px;" />
           </div>
+          <div class="setting-item" style="margin-bottom: 16px;">
+            <label style="display: block; margin-bottom: 8px;">
+              Quit App Shortcut:
+            </label>
+             <input type="text" id="quit-shortcut" value="${settings.quitShortcut || 'Ctrl+Alt+Q'}" placeholder="e.g. Ctrl+Alt+Q" style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 6px;" />
+          </div>
           <div class="setting-item" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
              <label style="display: block; margin-bottom: 5px;">Typing Speed (WPM):</label>
              <div style="display: flex; align-items: center; gap: 10px;">
@@ -2993,6 +2999,15 @@
         if (newGhostShortcut && this.config.settings.ghostShortcut !== newGhostShortcut) {
           this.config.settings.ghostShortcut = newGhostShortcut;
           await window.electronAPI.updateGhostShortcut(newGhostShortcut);
+        }
+      }
+
+      const quitShortcutInput = document.getElementById('quit-shortcut');
+      if (quitShortcutInput) {
+        const newQuitShortcut = quitShortcutInput.value.trim();
+        if (newQuitShortcut && this.config.settings.quitShortcut !== newQuitShortcut) {
+          this.config.settings.quitShortcut = newQuitShortcut;
+          await window.electronAPI.updateQuitShortcut(newQuitShortcut);
         }
       }
 
