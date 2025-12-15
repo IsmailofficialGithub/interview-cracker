@@ -40,7 +40,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.png"
     },
     "nsis": {
       "oneClick": false,
@@ -48,7 +48,9 @@
     },
     "files": [
       "src/**/*",
-      "package.json"
+      "assets/**/*",
+      "package.json",
+      "node_modules/**/*"
     ]
   }
 }

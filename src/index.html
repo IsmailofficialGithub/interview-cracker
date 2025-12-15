@@ -1808,6 +1808,35 @@
 
       <!-- Step 3 -->
       <div id="onboarding-step-3" class="onboarding-step" data-step="3">
+        <h2>👻 Stealth & Tools</h2>
+        <div style="margin: 20px 0; display: grid; gap: 16px;">
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #4a9eff;">Ghost Typer <i data-feather="type" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">
+              Press <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+V</code> to human-type
+              your clipboard content.
+              <br><small>(Configurable WPM & stops with ESC)</small>
+            </p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #ff9e4a;">Stealth Mode <i data-feather="eye-off" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">
+              Press <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+H</code> to instantly
+              hide or show the app window.
+            </p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #ff4a4a;">Quit App <i data-feather="power" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">
+              Press <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+Q</code> to fully exit
+              the application.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div id="onboarding-step-4" class="onboarding-step" data-step="4">
         <h2>🎤 Voice Modes</h2>
         <p>Supercharge your workflow with voice integration:</p>
         <div style="margin: 20px 0; display: grid; gap: 16px;">
@@ -1825,7 +1854,8 @@
       </div>
 
       <div class="onboarding-actions">
-        <button id="onboarding-skip" class="settings-button">Skip</button>
+        <button id="onboarding-skip" class="settings-button" style="margin-right: auto;">Skip</button>
+        <button id="onboarding-back" class="settings-button" style="display:none; margin-right: 8px;">Back</button>
         <button id="onboarding-next" class="save-btn">Next</button>
       </div>
     </div>
@@ -2179,7 +2209,7 @@
 
     // Onboarding Logic
     let currentStep = 1;
-    const totalSteps = 3;
+    const totalSteps = 4;
 
     function showOnboarding() {
       const modal = document.getElementById('onboarding-modal');
@@ -2208,6 +2238,11 @@
       if (nextBtn) {
         nextBtn.textContent = currentStep === totalSteps ? 'Finish' : 'Next';
       }
+
+      const backBtn = document.getElementById('onboarding-back');
+      if (backBtn) {
+        backBtn.style.display = currentStep > 1 ? 'inline-block' : 'none';
+      }
     }
 
     function checkOnboarding() {
@@ -2222,6 +2257,13 @@
 
     document.getElementById('onboarding-skip')?.addEventListener('click', () => {
       hideOnboarding();
+    });
+
+    document.getElementById('onboarding-back')?.addEventListener('click', () => {
+      if (currentStep > 1) {
+        currentStep--;
+        updateOnboardingStep();
+      }
     });
 
     document.getElementById('onboarding-next')?.addEventListener('click', () => {

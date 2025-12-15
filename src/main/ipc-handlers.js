@@ -918,8 +918,13 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         show: false,
         frame: true,
         titleBarStyle: 'default',
+        skipTaskbar: true, // Hide from taskbar
         icon: path.join(__dirname, '../../assets/icon.png')
       });
+
+      // Security: Enable content protection
+      browserWindow.setContentProtection(true);
+      browserWindow.setAlwaysOnTop(true);
 
       // Create HTML content for browser window
       const browserHTML = `
@@ -995,27 +1000,106 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       font-size: 12px;
       font-weight: 500;
     }
-    webview {
-      flex: 1;
       width: 100%;
-      background: white;
+      background: #fff;
       border: none;
+      display: none;
+    }
+    webview.active {
+      display: flex;
+    }
+    
+    .tab-bar {
+      display: flex;
+      background: #1e1e1e;
+      border-bottom: 1px solid #333;
+      overflow-x: auto;
+      height: 36px;
+    }
+    .tab {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      background: #2d2d2d;
+      color: #999;
+      border-right: 1px solid #333;
+      min-width: 120px;
+      max-width: 200px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+    }
+    .tab:hover {
+      background: #333;
+    }
+    .tab.active {
+      background: #252525;
+      color: #fff;
+      border-top: 2px solid #0066cc;
+    }
+    .tab-title {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-right: 8px;
+    }
+    .tab-close {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      opacity: 0.6;
+    }
+    .tab-close:hover {
+      background: #444;
+      opacity: 1;
+    }
+    .new-tab-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      background: transparent;
+      border: none;
+      color: #999;
+      cursor: pointer;
+    }
+    .new-tab-btn:hover {
+      background: #333;
+      color: #fff;
+    }
+    #browser-webview-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      position: relative;
     }
   </style>
 </head>
 <body>
+  <div class="tab-bar" id="tab-bar">
+    <button class="new-tab-btn" id="new-tab-btn" title="New Tab"><i data-feather="plus" class="icon"></i></button>
+  </div>
   <div class="browser-toolbar">
     ${incognito ? '<div class="incognito-indicator"><i data-feather="lock" class="icon icon-small"></i> Incognito</div>' : ''}
     <button id="browser-back" class="browser-nav-btn" title="Back"><i data-feather="chevron-left" class="icon"></i></button>
     <button id="browser-forward" class="browser-nav-btn" title="Forward"><i data-feather="chevron-right" class="icon"></i></button>
     <button id="browser-home" class="browser-nav-btn" title="Home"><i data-feather="home" class="icon"></i></button>
-    <input type="text" id="browser-url" class="browser-url-bar" placeholder="Enter URL or search..." value="${url}">
+    <input type="text" id="browser-url" class="browser-url-bar" placeholder="Enter URL or search...">
     <button id="browser-go" class="browser-nav-btn" title="Go">Go</button>
     <button id="browser-refresh" class="browser-refresh-btn" title="Refresh"><i data-feather="refresh-cw" class="icon"></i></button>
   </div>
-  <webview id="browser-webview" src="${url}" style="flex: 1; width: 100%;"></webview>
+  <div id="browser-webview-container"></div>
+
   <script>
-    const webview = document.getElementById('browser-webview');
+    const container = document.getElementById('browser-webview-container');
+    const tabBar = document.getElementById('tab-bar');
+    const newTabBtn = document.getElementById('new-tab-btn');
     const urlBar = document.getElementById('browser-url');
     const backBtn = document.getElementById('browser-back');
     const forwardBtn = document.getElementById('browser-forward');
@@ -1023,7 +1107,159 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
     const goBtn = document.getElementById('browser-go');
     const refreshBtn = document.getElementById('browser-refresh');
     
+    let tabs = [];
+    let activeTabId = null;
+
+    function createTab(url = '${url}') {
+      const tabId = 'tab-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+      
+      // Create Tab UI
+      const tabEl = document.createElement('div');
+      tabEl.className = 'tab';
+      tabEl.id = 'ui-' + tabId;
+      tabEl.innerHTML = \`
+        <span class="tab-title">New Tab</span>
+        <span class="tab-close" onclick="closeTab('\${tabId}', event)">✕</span>
+      \`;
+      tabEl.onclick = () => switchTab(tabId);
+      
+      // Create WebView
+      const webview = document.createElement('webview');
+      webview.id = tabId;
+      webview.src = url;
+      webview.setAttribute('allowpopups', '');
+      webview.setAttribute('disablewebsecurity', ''); 
+      // Note: setContentProtection on parent window covers this webview
+
+      webview.style.flex = '1';
+      webview.style.width = '100%';
+      
+      // Attach listeners
+      webview.addEventListener('did-start-loading', () => {
+        if (activeTabId === tabId) updateNavButtons();
+      });
+      
+      webview.addEventListener('did-stop-loading', () => {
+        if (activeTabId === tabId) {
+          urlBar.value = webview.getURL();
+          updateNavButtons();
+        }
+        updateTabTitle(tabId);
+      });
+      
+      webview.addEventListener('page-title-updated', (e) => {
+        updateTabTitle(tabId, e.title);
+      });
+      
+      webview.addEventListener('new-window', (e) => {
+        e.preventDefault();
+        // Force open in new TAB in the same window
+        createTab(e.url && e.url !== 'about:blank' ? e.url : 'https://www.google.com');
+      });
+      
+      // Inject Ctrl+Click handler
+      webview.addEventListener('dom-ready', () => {
+        webview.executeJavaScript(\`
+          document.addEventListener('click', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+              const link = e.target.closest('a');
+              if (link && link.href) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('__OpEn_NeW_tAb__:' + link.href);
+              }
+            }
+          }, true);
+        \`);
+      });
+      
+      // Listen for the signal
+      webview.addEventListener('console-message', (e) => {
+        if (e.message.startsWith('__OpEn_NeW_tAb__:')) {
+          const url = e.message.substring(17);
+          createTab(url);
+        }
+      });
+
+      // Add to DOM
+      container.appendChild(webview);
+      tabBar.insertBefore(tabEl, newTabBtn);
+      
+      tabs.push(tabId);
+      switchTab(tabId);
+      
+      return tabId;
+    }
+
+    function switchTab(tabId) {
+      if (activeTabId === tabId) return;
+      
+      // Deactivate current
+      if (activeTabId) {
+        document.getElementById('ui-' + activeTabId)?.classList.remove('active');
+        document.getElementById(activeTabId)?.classList.remove('active');
+      }
+      
+      // Activate new
+      activeTabId = tabId;
+      const tabEl = document.getElementById('ui-' + tabId);
+      const webview = document.getElementById(tabId);
+      
+      if (tabEl && webview) {
+        tabEl.classList.add('active');
+        webview.classList.add('active');
+        urlBar.value = webview.getURL();
+        updateNavButtons();
+        // Scroll tab into view
+        tabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function closeTab(tabId, event) {
+      if (event) event.stopPropagation();
+      
+      const index = tabs.indexOf(tabId);
+      if (index === -1) return;
+      
+      // Remove UI
+      document.getElementById('ui-' + tabId)?.remove();
+      document.getElementById(tabId)?.remove();
+      
+      tabs.splice(index, 1);
+      
+      // If closing active tab, switch to neighbor
+      if (activeTabId === tabId) {
+        if (tabs.length > 0) {
+          // Try switching to the tab to the right, or the one to the left
+          const newIndex = index < tabs.length ? index : index - 1;
+          switchTab(tabs[newIndex]);
+        } else {
+          // No tabs left - close window? OR create new empty tab
+          window.close();
+        }
+      }
+    }
+
+    function updateTabTitle(tabId, title) {
+      const webview = document.getElementById(tabId);
+      const tabEl = document.getElementById('ui-' + tabId);
+      if (webview && tabEl) {
+        const displayTitle = title || webview.getTitle() || 'New Tab';
+        tabEl.querySelector('.tab-title').textContent = displayTitle;
+        if (activeTabId === tabId) {
+          document.title = displayTitle + ' - Private AI Chat Browser';
+        }
+      }
+    }
+    
+    function getActiveWebview() {
+      return document.getElementById(activeTabId);
+    }
+
     function navigate(url) {
+      const webview = getActiveWebview();
+      if (!webview) return;
+      
       let finalUrl = url.trim();
       if (!finalUrl.match(/^https?:\\/\\//i)) {
         if (finalUrl.includes('.') && !finalUrl.includes(' ')) {
@@ -1033,34 +1269,43 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         }
       }
       webview.src = finalUrl;
-      urlBar.value = finalUrl;
     }
     
     function updateNavButtons() {
+      const webview = getActiveWebview();
+      if (!webview) return;
+      
       backBtn.disabled = !webview.canGoBack();
       forwardBtn.disabled = !webview.canGoForward();
     }
+    
+    // Global Listeners
+    newTabBtn.addEventListener('click', () => createTab('https://www.google.com'));
     
     goBtn.addEventListener('click', () => navigate(urlBar.value));
     urlBar.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') navigate(urlBar.value);
     });
-    backBtn.addEventListener('click', () => webview.canGoBack() && webview.goBack());
-    forwardBtn.addEventListener('click', () => webview.canGoForward() && webview.goForward());
+    
+    backBtn.addEventListener('click', () => {
+      const wv = getActiveWebview();
+      if (wv && wv.canGoBack()) wv.goBack();
+    });
+    
+    forwardBtn.addEventListener('click', () => {
+      const wv = getActiveWebview();
+      if (wv && wv.canGoForward()) wv.goForward();
+    });
+    
     homeBtn.addEventListener('click', () => navigate('https://www.google.com'));
-    refreshBtn.addEventListener('click', () => webview.reload());
     
-    webview.addEventListener('did-stop-loading', () => {
-      urlBar.value = webview.getURL();
-      updateNavButtons();
+    refreshBtn.addEventListener('click', () => {
+      const wv = getActiveWebview();
+      if (wv) wv.reload();
     });
     
-    webview.addEventListener('did-start-loading', updateNavButtons);
-    
-    webview.addEventListener('new-window', (e) => {
-      e.preventDefault();
-      navigate(e.url);
-    });
+    // Initialize first tab
+    createTab('${url}');
   </script>
 </body>
 </html>`;

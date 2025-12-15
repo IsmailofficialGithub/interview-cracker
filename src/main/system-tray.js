@@ -18,24 +18,30 @@ let hideCallback = null;
 function createTray(onShow, onHide) {
   showCallback = onShow;
   hideCallback = onHide;
-  
+
   // Use a simple icon (in production, provide actual icon file)
   // For now, use app icon or default
   const iconPath = path.join(__dirname, '../../assets/tray-icon.png');
-  
+
   // Create tray (will use default icon if file doesn't exist)
   try {
     tray = new Tray(iconPath);
   } catch (error) {
     // Fallback: create tray with no icon (will show default)
-    tray = new Tray(path.join(__dirname, '../../assets/icon.png'));
+    try {
+      tray = new Tray(path.join(__dirname, '../../assets/icon.png'));
+    } catch (e) {
+      console.error('Failed to create tray icon:', e);
+      // Create empty tray (might show system default or empty space)
+      // Note: On Windows, a tray icon is required effectively
+    }
   }
-  
+
   tray.setToolTip('Private AI Chat');
-  
+
   // Create context menu
   updateMenu();
-  
+
   // Handle click (Windows/Linux)
   tray.on('click', () => {
     if (showCallback) {
@@ -49,7 +55,7 @@ function createTray(onShow, onHide) {
  */
 function updateMenu() {
   if (!tray) return;
-  
+
   const menu = Menu.buildFromTemplate([
     {
       label: 'Show',
@@ -77,7 +83,7 @@ function updateMenu() {
       }
     }
   ]);
-  
+
   tray.setContextMenu(menu);
 }
 
@@ -92,7 +98,7 @@ function registerHotkeys(toggleCallback) {
       toggleCallback();
     }
   });
-  
+
   if (!ret) {
     console.error('Failed to register global shortcut CTRL+ALT+H');
     // Fallback to CTRL+SHIFT+H if CTRL+ALT+H fails
@@ -105,7 +111,7 @@ function registerHotkeys(toggleCallback) {
       console.error('Failed to register fallback shortcut');
     }
   }
-  
+
   // Unregister on app quit
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
