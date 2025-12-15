@@ -21,7 +21,7 @@ class GhostTyper {
         this.process = null;
     }
 
-    async typeClipboard() {
+    async typeClipboard(wpm = 40, mistakeChance = 5, maxMistakes = 1) {
         if (this.isTyping) {
             console.log('GhostTyper: Already typing, ignoring request.');
             return;
@@ -37,7 +37,7 @@ class GhostTyper {
         console.log(`GhostTyper: Starting to type ${text.length} chars...`);
 
         try {
-            await this.runPowerShellTyper(text);
+            await this.runPowerShellTyper(text, wpm, mistakeChance, maxMistakes);
         } catch (error) {
             console.error('GhostTyper error:', error);
         } finally {
@@ -54,7 +54,7 @@ class GhostTyper {
         }
     }
 
-    async runPowerShellTyper(text, wpm = 50) {
+    async runPowerShellTyper(text, wpm = 40, mistakeChance = 5, maxMistakes = 1) {
         // Escape text for PowerShell string
         // We will write the text to a temporary file instead of passing as arg to avoid escaping issues
         const tempFile = path.join(os.tmpdir(), `ghost-type-${Date.now()}.txt`);
@@ -93,7 +93,8 @@ class GhostTyper {
 
       # Config
       $baseDelay = ${baseDelay}
-      $errorRate = 5 # 5% chance
+      $errorRate = ${mistakeChance}
+      $maxMistakes = ${maxMistakes}
       $rng = New-Object Random
 
       # Neighbor map (simplified inline)
@@ -129,13 +130,29 @@ class GhostTyper {
         
         # 1. Mistake Logic (Scaled by speed: mistakes are rarer if typing very fast to keep flow)
         if ($rng.Next(0, 100) -lt $errorRate -and $charStr -match "[a-zA-Z]") {
-            $lower = $charStr.ToLower()
-            if ($neighbors.ContainsKey($lower)) {
-                $wrong = $neighbors[$lower]
-                Send-Key $wrong
-                Start-Sleep -Milliseconds ($rng.Next(150, 400)) # Realization pause
-                [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
-                Start-Sleep -Milliseconds ($rng.Next(50, 150)) # Correction pause
+            $numMistakes = $rng.Next(1, $maxMistakes + 1)
+            $mistakeStack = 0
+            $currBad = $charStr
+
+            for ($m = 0; $m -lt $numMistakes; $m++) {
+                $lower = $currBad.ToLower()
+                if ($neighbors.ContainsKey($lower)) {
+                    $wrong = $neighbors[$lower]
+                    Send-Key $wrong
+                    Start-Sleep -Milliseconds ($rng.Next(50, 150)) # Fast typing during mistake
+                    $currBad = $wrong 
+                    $mistakeStack++
+                } else {
+                    break
+                }
+            }
+
+            if ($mistakeStack -gt 0) {
+                 Start-Sleep -Milliseconds ($rng.Next(200, 450)) # Realization pause ("Wait, that's wrong")
+                 for ($b = 0; $b -lt $mistakeStack; $b++) {
+                     [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
+                     Start-Sleep -Milliseconds ($rng.Next(50, 120)) # Backspacing
+                 }
             }
         }
 

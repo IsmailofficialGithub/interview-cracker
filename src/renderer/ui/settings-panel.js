@@ -26,6 +26,19 @@ class SettingsPanel {
       const result = await window.electronAPI.getConfig();
       if (result.success) {
         this.config = result.data || { accounts: [], settings: {} };
+
+        // Sync settings with main process
+        if (this.config.settings) {
+          if (this.config.settings.ghostWpm) {
+            window.electronAPI.updateGhostWpm(this.config.settings.ghostWpm);
+          }
+          if (this.config.settings.ghostMistakeChance !== undefined) {
+            window.electronAPI.updateGhostMistakeChance(this.config.settings.ghostMistakeChance);
+          }
+          if (this.config.settings.ghostMaxMistakes !== undefined) {
+            window.electronAPI.updateGhostMaxMistakes(this.config.settings.ghostMaxMistakes);
+          }
+        }
       } else {
         this.config = { accounts: [], settings: {} };
       }
@@ -255,6 +268,21 @@ class SettingsPanel {
              <small style="color: #888;">(Higher is faster)</small>
            </div>
         </div>
+        <div class="setting-item">
+           <label style="display: block; margin-bottom: 5px;">Mistake Chance (%):</label>
+           <div style="display: flex; align-items: center; gap: 10px;">
+             <input type="number" id="ghost-mistake-chance" value="${settings.ghostMistakeChance !== undefined ? settings.ghostMistakeChance : 5}" min="0" max="100" style="width: 80px;" />
+             <small style="color: #888;">(0 = Perfect typing)</small>
+           </div>
+        </div>
+        <div class="setting-item">
+           <label style="display: block; margin-bottom: 5px;">Max Consecutive Mistakes:</label>
+           <div style="display: flex; align-items: center; gap: 10px;">
+             <input type="number" id="ghost-max-mistakes" value="${settings.ghostMaxMistakes || 1}" min="1" max="5" style="width: 80px;" />
+             <small style="color: #888;">(Max wrong chars at once)</small>
+           </div>
+        </div>
+
       </div>
       
       <div class="settings-actions">
@@ -415,12 +443,29 @@ class SettingsPanel {
       }
     }
 
-    const ghostWpmInput = document.getElementById('ghost-wpm');
     if (ghostWpmInput) {
       const newGhostWpm = parseInt(ghostWpmInput.value);
       if (newGhostWpm && this.config.settings.ghostWpm !== newGhostWpm) {
         this.config.settings.ghostWpm = newGhostWpm;
         await window.electronAPI.updateGhostWpm(newGhostWpm);
+      }
+    }
+
+    const mistakeChanceInput = document.getElementById('ghost-mistake-chance');
+    if (mistakeChanceInput) {
+      const newChance = parseInt(mistakeChanceInput.value);
+      if (!isNaN(newChance) && this.config.settings.ghostMistakeChance !== newChance) {
+        this.config.settings.ghostMistakeChance = newChance;
+        await window.electronAPI.updateGhostMistakeChance(newChance);
+      }
+    }
+
+    const maxMistakesInput = document.getElementById('ghost-max-mistakes');
+    if (maxMistakesInput) {
+      const newMax = parseInt(maxMistakesInput.value);
+      if (newMax && this.config.settings.ghostMaxMistakes !== newMax) {
+        this.config.settings.ghostMaxMistakes = newMax;
+        await window.electronAPI.updateGhostMaxMistakes(newMax);
       }
     }
 
