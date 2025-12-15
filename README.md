@@ -36,6 +36,7 @@ Noctisai is a stealthy, secure, and advanced AI assistant designed for seamless 
 - **Show/Hide App**: `Ctrl+Alt+H` (Default)
 - **Ghost Type Clipboard**: `Ctrl+Alt+V` (Default)
   - *Note: Stops immediately if you press `ESC`.*
+- **Quit App**: `Ctrl+Alt+Q` (Default)
 - **DevTools**: `F12` (if authorized)
 
 ### Voice Modes
