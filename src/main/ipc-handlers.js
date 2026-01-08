@@ -17,6 +17,8 @@ const { writeAuditLog } = require('../security/audit-log');
 const securityMonitor = require('./security-monitor');
 const fs = require('fs').promises;
 const path = require('path');
+const windowManagerService = require('./window-manager-service');
+const appDiscoveryService = require('./app-discovery-service');
 
 // Rate limiting for sensitive operations
 const rateLimit = {
@@ -1333,6 +1335,77 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       });
 
       return { success: true, windowId: browserWindow.id };
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get installed applications
+  ipcMain.handle('get-installed-apps', async () => {
+    try {
+      const apps = await appDiscoveryService.getCachedApps();
+      return { success: true, apps };
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message, apps: [] };
+    }
+  });
+
+  // Launch application and embed
+  ipcMain.handle('launch-app', async (event, appPath, tabId) => {
+    try {
+      const result = await windowManagerService.launchAndEmbed(appPath, tabId);
+      return result;
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Switch tab (show/hide embedded windows)
+  ipcMain.handle('switch-tab', async (event, fromTabId, toTabId) => {
+    try {
+      if (fromTabId) {
+        windowManagerService.hideTab(fromTabId);
+      }
+      if (toTabId) {
+        windowManagerService.showTab(toTabId);
+      }
+      return { success: true };
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Close tab
+  ipcMain.handle('close-tab', async (event, tabId) => {
+    try {
+      const result = windowManagerService.closeTab(tabId);
+      return result;
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Resize embedded window
+  ipcMain.handle('resize-embedded-window', async (event, tabId, width, height) => {
+    try {
+      const result = windowManagerService.resizeWindow(tabId, width, height);
+      return result;
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Move embedded window
+  ipcMain.handle('move-embedded-window', async (event, tabId, x, y) => {
+    try {
+      const result = windowManagerService.moveWindow(tabId, x, y);
+      return result;
     } catch (error) {
       securityMonitor.logError(error);
       return { success: false, error: error.message };

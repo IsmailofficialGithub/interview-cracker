@@ -10,6 +10,8 @@ const systemTray = require('./system-tray');
 const ipcHandlers = require('./ipc-handlers');
 const securityMonitor = require('./security-monitor');
 const ghostTyper = require('./ghost-typer');
+const windowManagerService = require('./window-manager-service');
+const appDiscoveryService = require('./app-discovery-service');
 
 // Security: Disable remote module
 app.allowRendererProcessReuse = true;
@@ -44,8 +46,8 @@ function createWindow() {
       webviewTag: true, // Enable webview tag for in-built browser
     },
     show: false, // Don't show until ready
-    frame: false, // Frameless window
-    titleBarStyle: 'hidden', // Hide title bar
+    frame: true, // Show window frame with title bar
+    titleBarStyle: 'default', // Show default title bar
     skipTaskbar: true, // Hide from taskbar
     icon: path.join(__dirname, '../../assets/icon.png') // Will be set if exists
   });
@@ -166,6 +168,27 @@ function createWindow() {
 
   // Initialize window manager
   windowManager.initialize(mainWindow);
+
+  // Initialize desktop app embedding services (Windows only)
+  if (process.platform === 'win32') {
+    try {
+      windowManagerService.initialize(mainWindow);
+      appDiscoveryService.initialize();
+      
+      // Hook window resize events
+      mainWindow.on('resize', () => {
+        const bounds = mainWindow.getBounds();
+        windowManagerService.resizeAllWindows(bounds.width, bounds.height);
+      });
+      
+      // Monitor processes periodically
+      setInterval(() => {
+        windowManagerService.monitorProcesses();
+      }, 5000); // Check every 5 seconds
+    } catch (error) {
+      console.error('Failed to initialize desktop app embedding services:', error);
+    }
+  }
 
   // Register IPC handlers
   ipcHandlers.registerHandlers(mainWindow, () => sessionKey, (key) => {
@@ -298,6 +321,15 @@ if (!gotTheLock) {
 app.on('before-quit', () => {
   sessionKey = null;
   securityMonitor.shutdown();
+  
+  // Cleanup embedded windows
+  if (process.platform === 'win32') {
+    try {
+      windowManagerService.cleanupAll();
+    } catch (error) {
+      console.error('Error cleaning up embedded windows:', error);
+    }
+  }
 });
 
 // Handle uncaught errors

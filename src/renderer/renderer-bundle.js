@@ -3478,6 +3478,10 @@
       logsPanel.addLog(logData.level || 'error', logData.message, logData.stack, logData.details);
     });
 
+    // Initialize desktop apps view
+    const desktopAppsView = new modules.DesktopAppsView();
+    window.desktopAppsView = desktopAppsView; // Make globally accessible
+
     console.log('Setting up button event listeners...');
 
     const settingsBtn = document.getElementById('settings-button');
@@ -3552,6 +3556,40 @@
       chatsCloseBtn.addEventListener('click', () => {
         chatsSidebar.style.display = 'none';
         document.body.classList.remove('sidebar-open');
+      });
+    }
+
+    // Desktop Apps button
+    const desktopAppsButton = document.getElementById('desktop-apps-button');
+    if (desktopAppsButton && desktopAppsView) {
+      const newBtn = desktopAppsButton.cloneNode(true);
+      desktopAppsButton.parentNode.replaceChild(newBtn, desktopAppsButton);
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (desktopAppsView.isOpen) {
+          desktopAppsView.hide();
+        } else {
+          desktopAppsView.show();
+        }
+      });
+    }
+
+    // Listen for embedded window closed events
+    if (window.electronAPI && window.electronAPI.onEmbeddedWindowClosed) {
+      window.electronAPI.onEmbeddedWindowClosed((data) => {
+        if (desktopAppsView && data.tabId) {
+          // Show notification if window closed unexpectedly
+          if (data.reason && data.reason !== 'user_closed') {
+            if (window.logsPanel) {
+              window.logsPanel.addLog('warn', `Embedded window closed unexpectedly: ${data.reason}`, null, {
+                source: 'DesktopApps',
+                tabId: data.tabId
+              });
+            }
+          }
+          desktopAppsView.closeTab(data.tabId);
+        }
       });
     }
 
@@ -4842,6 +4880,461 @@
       }
     });
   }
+
+  // DesktopAppsView Module
+  modules.DesktopAppsView = class DesktopAppsView {
+    constructor() {
+      this.isOpen = false;
+      this.activeApps = new Map(); // tabId -> { appInfo, appName }
+      this.tabs = [];
+      this.activeTabId = null;
+      this.appsContainer = null;
+      this.viewContainer = null;
+      this.allApps = []; // Store all apps for filtering
+      this.searchQuery = '';
+    }
+
+    async show() {
+      if (this.isOpen) return;
+      
+      this.isOpen = true;
+      document.body.classList.add('desktop-apps-open');
+      
+      // Hide other views
+      document.body.classList.remove('browser-open');
+      
+      // Create or show desktop apps container
+      let container = document.getElementById('desktop-apps-view');
+      if (!container) {
+        container = this.createDesktopAppsView();
+        document.querySelector('.main-content').appendChild(container);
+      }
+      
+      container.style.display = 'flex';
+      this.viewContainer = container;
+      this.appsContainer = document.getElementById('desktop-apps-list');
+      
+      // Setup keyboard shortcuts for tab navigation
+      this.setupKeyboardShortcuts();
+      
+      // Load available apps
+      await this.loadAvailableApps();
+    }
+
+    createDesktopAppsView() {
+      const container = document.createElement('div');
+      container.id = 'desktop-apps-view';
+      container.className = 'desktop-apps-view';
+      container.innerHTML = `
+        <div class="desktop-apps-sidebar">
+          <div class="desktop-apps-header">
+            <h3>Installed Apps</h3>
+            <div class="desktop-apps-header-actions">
+              <button id="desktop-apps-refresh" class="desktop-apps-refresh-btn" title="Refresh Apps">
+                <i data-feather="refresh-cw" class="icon icon-small"></i>
+              </button>
+            </div>
+          </div>
+          <div class="desktop-apps-search">
+            <i data-feather="search" class="desktop-apps-search-icon"></i>
+            <input type="text" id="desktop-apps-search-input" class="desktop-apps-search-input" placeholder="Search apps...">
+            <button id="desktop-apps-search-clear" class="desktop-apps-search-clear" title="Clear search" style="display: none;">
+              <i data-feather="x" class="icon icon-small"></i>
+            </button>
+          </div>
+          <div id="desktop-apps-list" class="desktop-apps-list"></div>
+        </div>
+        <div class="desktop-apps-content">
+          <div class="desktop-apps-tabs" id="desktop-apps-tabs"></div>
+          <div class="desktop-apps-display" id="desktop-apps-display">
+            <div class="desktop-apps-empty">
+              <i data-feather="monitor" class="icon icon-large"></i>
+              <p>Select an application to embed</p>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Setup event listeners
+      const refreshBtn = container.querySelector('#desktop-apps-refresh');
+      refreshBtn?.addEventListener('click', () => this.loadAvailableApps());
+      
+      // Setup search functionality
+      const searchInput = container.querySelector('#desktop-apps-search-input');
+      const searchClear = container.querySelector('#desktop-apps-search-clear');
+      
+      searchInput?.addEventListener('input', (e) => {
+        this.searchQuery = e.target.value.toLowerCase().trim();
+        searchClear.style.display = this.searchQuery ? 'flex' : 'none';
+        this.filterApps();
+      });
+      
+      searchClear?.addEventListener('click', () => {
+        searchInput.value = '';
+        this.searchQuery = '';
+        searchClear.style.display = 'none';
+        this.filterApps();
+      });
+      
+      if (typeof feather !== 'undefined') feather.replace();
+      
+      return container;
+    }
+
+    async loadAvailableApps() {
+      if (!this.appsContainer) return;
+      
+      try {
+        this.appsContainer.innerHTML = '<div style="padding: 20px; color: #999;">Loading apps...</div>';
+        
+        const result = await window.electronAPI.getInstalledApps();
+        
+        if (!result.success) {
+          this.appsContainer.innerHTML = `<div style="padding: 20px; color: #ff6b6b;">Error: ${result.error || 'Failed to load apps'}</div>`;
+          if (window.logsPanel) {
+            window.logsPanel.addLog('error', `Failed to load installed apps: ${result.error}`, null);
+          }
+          return;
+        }
+        
+        // Store all apps for filtering
+        this.allApps = result.apps || [];
+        
+        // Render apps (will be filtered by search if needed)
+        this.renderApps();
+      } catch (error) {
+        console.error('Error loading desktop apps:', error);
+        if (this.appsContainer) {
+          this.appsContainer.innerHTML = `<div style="padding: 20px; color: #ff6b6b;">Error: ${error.message}</div>`;
+        }
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Failed to load desktop apps: ${error.message}`, error.stack);
+        }
+      }
+    }
+
+    filterApps() {
+      if (!this.appsContainer) return;
+      
+      if (!this.allApps || this.allApps.length === 0) {
+        this.appsContainer.innerHTML = '<div style="padding: 20px; color: #999;">No applications found</div>';
+        return;
+      }
+      
+      // Filter apps based on search query
+      const filteredApps = this.searchQuery
+        ? this.allApps.filter(app => {
+            const name = (app.name || '').toLowerCase();
+            const path = (app.path || '').toLowerCase();
+            return name.includes(this.searchQuery) || path.includes(this.searchQuery);
+          })
+        : this.allApps;
+      
+      this.renderApps(filteredApps);
+    }
+    
+    renderApps(appsToRender = null) {
+      if (!this.appsContainer) return;
+      
+      const apps = appsToRender || this.allApps;
+      
+      this.appsContainer.innerHTML = '';
+      
+      if (!apps || apps.length === 0) {
+        this.appsContainer.innerHTML = '<div style="padding: 20px; color: #999;">No applications found</div>';
+        return;
+      }
+      
+      apps.forEach(app => {
+        const appItem = document.createElement('div');
+        appItem.className = 'desktop-app-item';
+        appItem.innerHTML = `
+          <div class="desktop-app-icon">
+            <i data-feather="monitor" class="icon"></i>
+          </div>
+          <div class="desktop-app-info">
+            <div class="desktop-app-name">${app.name || 'Unknown App'}</div>
+            <div class="desktop-app-path">${app.path || ''}</div>
+          </div>
+          <button class="desktop-app-add-btn" data-app-id="${app.id}" title="Launch App">
+            <i data-feather="play" class="icon icon-small"></i>
+          </button>
+        `;
+        
+        const addBtn = appItem.querySelector('.desktop-app-add-btn');
+        addBtn.addEventListener('click', () => this.embedApp(app));
+        
+        this.appsContainer.appendChild(appItem);
+      });
+      
+      if (typeof feather !== 'undefined') feather.replace();
+    }
+
+    async embedApp(appInfo) {
+      try {
+        // Check if already embedded
+        const existingTab = this.tabs.find(t => t.appPath === appInfo.path);
+        if (existingTab) {
+          this.switchTab(existingTab.id);
+          return;
+        }
+        
+        // Generate tab ID
+        const tabId = `app-tab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const appName = appInfo.name || (appInfo.path ? appInfo.path.split(/[/\\]/).pop().replace(/\.exe$/i, '') : 'Unknown App');
+        
+        // Show loading state
+        const displayContainer = document.getElementById('desktop-apps-display');
+        if (displayContainer) {
+          displayContainer.innerHTML = `<div style="padding: 40px; text-align: center; color: #999;">
+            <i data-feather="loader" class="icon icon-large" style="animation: spin 1s linear infinite;"></i>
+            <p>Launching ${appName}...</p>
+          </div>`;
+          if (typeof feather !== 'undefined') feather.replace();
+        }
+        
+        // Launch app via IPC
+        const result = await window.electronAPI.launchApp(appInfo.path, tabId);
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to launch application');
+        }
+        
+        // Create tab
+        const tab = this.createAppTab(tabId, appName);
+        this.tabs.push({ id: tabId, appName, appPath: appInfo.path, appInfo });
+        this.activeApps.set(tabId, { appInfo, appName });
+        
+        // Add tab to UI
+        const tabsContainer = document.getElementById('desktop-apps-tabs');
+        if (tabsContainer) {
+          tabsContainer.appendChild(tab);
+        }
+        
+        // Update display
+        if (displayContainer) {
+          displayContainer.innerHTML = '<div class="desktop-apps-window-container"></div>';
+        }
+        
+        // Switch to this tab
+        this.switchTab(tabId);
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('success', `Launched and embedded: ${appName}`, null, {
+            source: 'DesktopApps',
+            appName,
+            tabId
+          });
+        }
+      } catch (error) {
+        console.error('Error embedding app:', error);
+        const displayContainer = document.getElementById('desktop-apps-display');
+        if (displayContainer) {
+          let errorMessage = error.message || 'Unknown error';
+          let errorIcon = 'alert-circle';
+          
+          // Provide helpful error messages
+          if (errorMessage.includes('Window not found')) {
+            errorMessage = 'Application launched but window not found.\n\nThe app may have a delayed startup or requires user interaction before showing a window.';
+            errorIcon = 'clock';
+          } else if (errorMessage.includes('disappeared after embedding')) {
+            errorMessage = 'This application does not support window embedding.\n\nSome apps (like security software or DRM-protected apps) prevent their windows from being embedded.';
+            errorIcon = 'lock';
+            // Mark as incompatible (could store in localStorage for future)
+          } else if (errorMessage.includes('Failed to start')) {
+            errorMessage = 'Failed to start the application.\n\nPlease check:\n• The application path is correct\n• You have permission to run it\n• All required dependencies are installed';
+            errorIcon = 'x-circle';
+          }
+          
+          displayContainer.innerHTML = `<div style="padding: 40px; text-align: center; color: #ff6b6b;">
+            <i data-feather="${errorIcon}" class="icon icon-large"></i>
+            <p style="margin-top: 16px; white-space: pre-line;">${errorMessage}</p>
+          </div>`;
+          if (typeof feather !== 'undefined') feather.replace();
+        }
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Failed to embed app: ${error.message}`, error.stack, {
+            source: 'DesktopApps',
+            appPath: appInfo.path,
+            appName: appInfo.name
+          });
+        }
+        // Don't show alert - error is already displayed in UI
+      }
+    }
+
+    createAppTab(tabId, appName) {
+      const tab = document.createElement('div');
+      tab.className = 'desktop-app-tab';
+      tab.dataset.tabId = tabId;
+      tab.innerHTML = `
+        <button class="desktop-app-tab-close" data-tab-id="${tabId}" title="Close">
+          <i data-feather="x" class="icon icon-small"></i>
+        </button>
+        <span class="desktop-app-tab-title">${appName}</span>
+      `;
+      
+      const closeBtn = tab.querySelector('.desktop-app-tab-close');
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closeTab(tabId);
+      });
+      
+      tab.addEventListener('click', () => this.switchTab(tabId));
+      
+      if (typeof feather !== 'undefined') feather.replace();
+      
+      return tab;
+    }
+
+    switchTab(tabId) {
+      const tab = this.tabs.find(t => t.id === tabId);
+      if (!tab) return;
+      
+      // Update active tab
+      this.activeTabId = tabId;
+      
+      // Update tab buttons
+      document.querySelectorAll('.desktop-app-tab').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      const activeTabButton = document.querySelector(`.desktop-app-tab[data-tab-id="${tabId}"]`);
+      if (activeTabButton) activeTabButton.classList.add('active');
+      
+      // Switch windows via IPC
+      const previousTabId = this.tabs.find(t => t.id !== tabId && t.active)?.id;
+      if (previousTabId) {
+        window.electronAPI.switchTab(previousTabId, tabId).catch(err => {
+          console.error('Error switching tabs:', err);
+        });
+      } else {
+        window.electronAPI.switchTab(null, tabId).catch(err => {
+          console.error('Error switching tabs:', err);
+        });
+      }
+      
+      // Mark tabs
+      this.tabs.forEach(t => t.active = (t.id === tabId));
+    }
+
+    switchToPreviousTab() {
+      if (this.tabs.length <= 1) return;
+      
+      const currentIndex = this.tabs.findIndex(t => t.id === this.activeTabId);
+      if (currentIndex === -1) return;
+      
+      const previousIndex = currentIndex > 0 ? currentIndex - 1 : this.tabs.length - 1;
+      this.switchTab(this.tabs[previousIndex].id);
+    }
+
+    switchToNextTab() {
+      if (this.tabs.length <= 1) return;
+      
+      const currentIndex = this.tabs.findIndex(t => t.id === this.activeTabId);
+      if (currentIndex === -1) return;
+      
+      const nextIndex = currentIndex < this.tabs.length - 1 ? currentIndex + 1 : 0;
+      this.switchTab(this.tabs[nextIndex].id);
+    }
+
+    setupKeyboardShortcuts() {
+      // Remove existing listeners if any
+      if (this._keyboardHandler) {
+        document.removeEventListener('keydown', this._keyboardHandler);
+      }
+
+      // Create new handler
+      this._keyboardHandler = (event) => {
+        // Only handle if desktop apps view is open
+        if (!this.isOpen) return;
+        
+        // Ctrl+Left Arrow or Alt+Left Arrow: Switch to previous tab
+        if ((event.ctrlKey || event.altKey) && event.key === 'ArrowLeft') {
+          event.preventDefault();
+          event.stopPropagation();
+          this.switchToPreviousTab();
+          return;
+        }
+        
+        // Ctrl+Right Arrow or Alt+Right Arrow: Switch to next tab
+        if ((event.ctrlKey || event.altKey) && event.key === 'ArrowRight') {
+          event.preventDefault();
+          event.stopPropagation();
+          this.switchToNextTab();
+          return;
+        }
+      };
+
+      // Add listener
+      document.addEventListener('keydown', this._keyboardHandler, true);
+    }
+
+    async closeTab(tabId) {
+      const tabIndex = this.tabs.findIndex(t => t.id === tabId);
+      if (tabIndex === -1) return;
+      
+      // Close via IPC
+      try {
+        const result = await window.electronAPI.closeTab(tabId);
+        if (!result.success) {
+          console.error('Error closing tab:', result.error);
+        }
+      } catch (error) {
+        console.error('Error closing tab:', error);
+      }
+      
+      // Remove from arrays
+      this.tabs.splice(tabIndex, 1);
+      this.activeApps.delete(tabId);
+      
+      // Remove tab button
+      const tabButton = document.querySelector(`.desktop-app-tab[data-tab-id="${tabId}"]`);
+      if (tabButton) tabButton.remove();
+      
+      // Switch to another tab if closing active tab
+      if (this.activeTabId === tabId) {
+        if (this.tabs.length > 0) {
+          this.switchTab(this.tabs[this.tabs.length - 1].id);
+        } else {
+          this.activeTabId = null;
+          const displayContainer = document.getElementById('desktop-apps-display');
+          if (displayContainer) {
+            displayContainer.innerHTML = `
+              <div class="desktop-apps-empty">
+                <i data-feather="monitor" class="icon icon-large"></i>
+                <p>Select an application to embed</p>
+              </div>
+            `;
+            if (typeof feather !== 'undefined') feather.replace();
+          }
+        }
+      }
+    }
+
+    hide() {
+      if (!this.isOpen) return;
+      
+      this.isOpen = false;
+      document.body.classList.remove('desktop-apps-open');
+      
+      // Remove keyboard listeners
+      if (this._keyboardHandler) {
+        document.removeEventListener('keydown', this._keyboardHandler);
+        this._keyboardHandler = null;
+      }
+      
+      // Close all tabs
+      const tabIds = Array.from(this.activeApps.keys());
+      tabIds.forEach(tabId => {
+        this.closeTab(tabId);
+      });
+      
+      const container = document.getElementById('desktop-apps-view');
+      if (container) {
+        container.style.display = 'none';
+      }
+    }
+  };
 
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {

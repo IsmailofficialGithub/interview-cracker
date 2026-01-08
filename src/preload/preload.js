@@ -145,7 +145,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateShortcut: (shortcut) => ipcRenderer.invoke('update-shortcut', shortcut),
   updateGhostShortcut: (shortcut) => ipcRenderer.invoke('update-ghost-shortcut', shortcut),
   updateQuitShortcut: (shortcut) => ipcRenderer.invoke('update-quit-shortcut', shortcut),
-  updateGhostWpm: (wpm) => ipcRenderer.invoke('update-ghost-wpm', wpm)
+  updateGhostWpm: (wpm) => ipcRenderer.invoke('update-ghost-wpm', wpm),
+
+  // Desktop Apps
+  getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),
+  launchApp: (appPath, tabId) => ipcRenderer.invoke('launch-app', appPath, tabId),
+  switchTab: (fromTabId, toTabId) => ipcRenderer.invoke('switch-tab', fromTabId, toTabId),
+  closeTab: (tabId) => ipcRenderer.invoke('close-tab', tabId),
+  resizeEmbeddedWindow: (tabId, width, height) => ipcRenderer.invoke('resize-embedded-window', tabId, width, height),
+  moveEmbeddedWindow: (tabId, x, y) => ipcRenderer.invoke('move-embedded-window', tabId, x, y),
+
+  // Desktop Apps events
+  onEmbeddedWindowClosed: (callback) => {
+    ipcRenderer.on('embedded-window-closed', (event, data) => callback(data));
+    return () => ipcRenderer.removeListener('embedded-window-closed', callback);
+  }
 });
 
 // Log that preload script loaded (for debugging)
