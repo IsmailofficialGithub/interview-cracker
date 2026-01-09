@@ -70,21 +70,53 @@ class VoiceAssistant {
       if (result.success && result.data) {
         this.config = result.data;
 
-        // Find Groq provider first, then OpenAI
+        // Get voice API setting from settings (user's preference)
+        const settings = this.config.settings || {};
+        const voiceAPI = settings.voiceAPI || 'groq-whisper'; // Default to Groq Whisper
+        
+        console.log('[VoiceAssistant] Voice API setting:', voiceAPI);
+
+        // Find accounts
         const accounts = this.config.accounts || [];
         const groqAccount = accounts.find(a => a.type === 'groq');
         const openaiAccount = accounts.find(a => a.type === 'openai');
 
+        // Set whisper provider based on user's voiceAPI setting, not which account exists first
+        if (voiceAPI === 'openai-whisper' || voiceAPI === 'openai') {
+          // User wants OpenAI Whisper
+          if (openaiAccount) {
+            this.whisperProvider = 'openai';
+            this.whisperApiKey = openaiAccount.apiKey;
+            this.whisperModel = 'whisper-1';
+            console.log('[VoiceAssistant] Using OpenAI Whisper for transcription');
+          } else {
+            console.warn('[VoiceAssistant] OpenAI Whisper selected but no OpenAI account found, falling back to Groq');
+            if (groqAccount) {
+              this.whisperProvider = 'groq';
+              this.whisperApiKey = groqAccount.apiKey;
+              this.whisperModel = 'whisper-large-v3-turbo';
+            }
+          }
+        } else {
+          // Default to Groq Whisper (groq-whisper or any other value)
+          if (groqAccount) {
+            this.whisperProvider = 'groq';
+            this.whisperApiKey = groqAccount.apiKey;
+            this.whisperModel = 'whisper-large-v3-turbo';
+            console.log('[VoiceAssistant] Using Groq Whisper for transcription');
+          } else if (openaiAccount) {
+            console.warn('[VoiceAssistant] Groq Whisper selected but no Groq account found, falling back to OpenAI');
+            this.whisperProvider = 'openai';
+            this.whisperApiKey = openaiAccount.apiKey;
+            this.whisperModel = 'whisper-1';
+          }
+        }
+
+        // Set currentProvider for LLM (this is now handled by chat selection, but keep for fallback)
         if (groqAccount) {
           this.currentProvider = 'groq';
-          this.whisperProvider = 'groq';
-          this.whisperApiKey = groqAccount.apiKey;
-          this.whisperModel = 'whisper-large-v3-turbo';
         } else if (openaiAccount) {
           this.currentProvider = 'openai';
-          this.whisperProvider = 'openai';
-          this.whisperApiKey = openaiAccount.apiKey;
-          this.whisperModel = 'whisper-1';
         }
       }
     } catch (error) {
@@ -748,11 +780,15 @@ class VoiceAssistant {
     this.updateStatus();
 
     try {
+      // Reload config to ensure we have the latest voice API setting
+      await this.loadConfig();
+      
       // Convert to ArrayBuffer for IPC
       const arrayBuffer = await audioBlob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
 
       console.log(`Processing audio blob: ${audioBlob.size} bytes`);
+      console.log(`[VoiceAssistant] Using whisper provider: ${this.whisperProvider}, model: ${this.whisperModel}`);
 
       // Transcribe using Whisper API
       const transcriptionResult = await window.electronAPI.transcribeAudio(
@@ -933,36 +969,98 @@ class VoiceAssistant {
         chatContext = this.chatUI.context;
       }
 
-      // Get provider config
+      // Get provider config - use the chat's selected provider, not voice assistant's internal provider
       const accounts = this.config?.accounts || [];
       let providerConfig = null;
 
-      if (this.currentProvider === 'groq') {
-        const groqAccount = accounts.find(a => a.type === 'groq');
-        if (groqAccount) {
+      // Use the chat's selected provider (from dropdown) instead of voice assistant's internal provider
+      const selectedProviderId = window.currentProviderId || null;
+      console.log('[VoiceAssistant] Using chat selected provider:', selectedProviderId, 'instead of voice assistant provider:', this.currentProvider);
+
+      if (selectedProviderId) {
+        // Find the account by name (the selected provider ID is the account name)
+        const selectedAccount = accounts.find(acc => acc.name === selectedProviderId);
+        if (selectedAccount) {
+          console.log('[VoiceAssistant] Found selected account:', {
+            name: selectedAccount.name,
+            type: selectedAccount.type,
+            model: selectedAccount.model
+          });
+
           // SAFEGUARD: Ensure we don't use Whisper model for Chat
-          let model = groqAccount.model || 'llama-3.1-8b-instant';
+          let model = selectedAccount.model || (selectedAccount.type === 'groq' ? 'llama-3.1-8b-instant' : 'gpt-3.5-turbo');
           if (model.includes('whisper')) {
-            console.warn('Whisper model selected for chat - falling back to llama-3.1-8b-instant');
-            model = 'llama-3.1-8b-instant';
+            console.warn('[VoiceAssistant] Whisper model selected for chat - falling back to default');
+            model = selectedAccount.type === 'groq' ? 'llama-3.1-8b-instant' : 'gpt-3.5-turbo';
           }
 
           providerConfig = {
-            type: 'groq',
-            apiKey: groqAccount.apiKey,
+            name: selectedAccount.name,
+            type: selectedAccount.type,
+            apiKey: selectedAccount.apiKey,
             model: model,
-            baseURL: groqAccount.baseURL
+            baseURL: selectedAccount.baseURL
           };
+        } else {
+          console.warn('[VoiceAssistant] Selected provider not found in accounts, falling back to old logic');
+          // Fallback to old logic if selected provider not found
+          if (this.currentProvider === 'groq') {
+            const groqAccount = accounts.find(a => a.type === 'groq');
+            if (groqAccount) {
+              let model = groqAccount.model || 'llama-3.1-8b-instant';
+              if (model.includes('whisper')) {
+                model = 'llama-3.1-8b-instant';
+              }
+              providerConfig = {
+                name: groqAccount.name,
+                type: 'groq',
+                apiKey: groqAccount.apiKey,
+                model: model,
+                baseURL: groqAccount.baseURL
+              };
+            }
+          } else {
+            const openaiAccount = accounts.find(a => a.type === 'openai');
+            if (openaiAccount) {
+              providerConfig = {
+                name: openaiAccount.name,
+                type: 'openai',
+                apiKey: openaiAccount.apiKey,
+                model: openaiAccount.model || 'gpt-3.5-turbo',
+                baseURL: openaiAccount.baseURL
+              };
+            }
+          }
         }
       } else {
-        const openaiAccount = accounts.find(a => a.type === 'openai');
-        if (openaiAccount) {
-          providerConfig = {
-            type: 'openai',
-            apiKey: openaiAccount.apiKey,
-            model: openaiAccount.model || 'gpt-3.5-turbo',
-            baseURL: openaiAccount.baseURL
-          };
+        // No provider selected in chat, use old logic as fallback
+        console.warn('[VoiceAssistant] No chat provider selected, using voice assistant provider:', this.currentProvider);
+        if (this.currentProvider === 'groq') {
+          const groqAccount = accounts.find(a => a.type === 'groq');
+          if (groqAccount) {
+            let model = groqAccount.model || 'llama-3.1-8b-instant';
+            if (model.includes('whisper')) {
+              model = 'llama-3.1-8b-instant';
+            }
+            providerConfig = {
+              name: groqAccount.name,
+              type: 'groq',
+              apiKey: groqAccount.apiKey,
+              model: model,
+              baseURL: groqAccount.baseURL
+            };
+          }
+        } else {
+          const openaiAccount = accounts.find(a => a.type === 'openai');
+          if (openaiAccount) {
+            providerConfig = {
+              name: openaiAccount.name,
+              type: 'openai',
+              apiKey: openaiAccount.apiKey,
+              model: openaiAccount.model || 'gpt-3.5-turbo',
+              baseURL: openaiAccount.baseURL
+            };
+          }
         }
       }
 

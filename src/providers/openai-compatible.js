@@ -9,9 +9,29 @@ const BaseProvider = require('./base-provider');
 class OpenAICompatibleProvider extends BaseProvider {
   constructor(config) {
     super(config);
-    this.baseURL = config.baseURL || 'http://localhost:8080';
+    const baseURL = (config.baseURL || '').trim();
+    const apiKey = (config.apiKey || '').trim();
+    const model = (config.model || '').toLowerCase();
+    
+    // Detect if this is likely meant to be OpenAI but misconfigured
+    if (!baseURL || baseURL === 'http://localhost:8080') {
+      // Check if it has OpenAI characteristics
+      const hasOpenAIModel = model && (model.startsWith('gpt-') || model.includes('gpt'));
+      const hasApiKey = apiKey && apiKey.length > 0;
+      
+      if (hasOpenAIModel || hasApiKey) {
+        // This is likely meant to be OpenAI, not a local server
+        throw new Error(
+          `This account appears to be configured for OpenAI but is set as "OpenAI-Compatible". ` +
+          `Please change the provider type to "OpenAI" in Settings → AI Accounts. ` +
+          `If you intended to use a local OpenAI-compatible server, please set the Base URL to your server address (e.g., http://localhost:11434).`
+        );
+      }
+    }
+    
+    this.baseURL = baseURL || 'http://localhost:8080';
     this.model = config.model || 'gpt-3.5-turbo';
-    this.apiKey = config.apiKey || ''; // Optional
+    this.apiKey = apiKey;
     this.timeout = config.timeout || 60000;
   }
   
@@ -68,7 +88,19 @@ class OpenAICompatibleProvider extends BaseProvider {
       }
     } catch (error) {
       if (error.code === 'ECONNREFUSED') {
-        throw new Error(`Cannot connect to ${this.baseURL}. Is the server running?`);
+        // Provide helpful error message if trying to connect to localhost:8080
+        if (this.baseURL === 'http://localhost:8080') {
+          throw new Error(
+            `Cannot connect to ${this.baseURL}. Is the server running?\n\n` +
+            `If you're trying to use OpenAI, please:\n` +
+            `1. Go to Settings → AI Accounts\n` +
+            `2. Edit this account\n` +
+            `3. Change the Provider Type from "OpenAI-Compatible" to "OpenAI"\n\n` +
+            `If you're using a local OpenAI-compatible server, please set the Base URL to your server address.`
+          );
+        } else {
+          throw new Error(`Cannot connect to ${this.baseURL}. Is the server running?`);
+        }
       }
       if (error.response) {
         throw new Error(`API error: ${error.response.data?.error?.message || error.message}`);
@@ -148,7 +180,19 @@ class OpenAICompatibleProvider extends BaseProvider {
         });
       }).catch(error => {
         if (error.code === 'ECONNREFUSED') {
-          reject(new Error(`Cannot connect to ${this.baseURL}. Is the server running?`));
+          // Provide helpful error message if trying to connect to localhost:8080
+          if (this.baseURL === 'http://localhost:8080') {
+            reject(new Error(
+              `Cannot connect to ${this.baseURL}. Is the server running?\n\n` +
+              `If you're trying to use OpenAI, please:\n` +
+              `1. Go to Settings → AI Accounts\n` +
+              `2. Edit this account\n` +
+              `3. Change the Provider Type from "OpenAI-Compatible" to "OpenAI"\n\n` +
+              `If you're using a local OpenAI-compatible server, please set the Base URL to your server address.`
+            ));
+          } else {
+            reject(new Error(`Cannot connect to ${this.baseURL}. Is the server running?`));
+          }
         } else if (error.response) {
           reject(new Error(`API error: ${error.response.data?.error?.message || error.message}`));
         } else {

@@ -13,6 +13,15 @@ class OpenAIProvider extends BaseProvider {
     this.model = config.model || 'gpt-3.5-turbo';
     this.baseURL = config.baseURL || 'https://api.openai.com/v1';
     this.timeout = config.timeout || 30000;
+    
+    // DEBUG: Log API key status
+    console.log('[OpenAIProvider] Constructor called:', {
+      hasApiKey: !!this.apiKey,
+      apiKeyLength: this.apiKey ? this.apiKey.length : 0,
+      apiKeyPreview: this.apiKey ? this.apiKey.substring(0, 10) + '...' + this.apiKey.slice(-4) : 'none',
+      model: this.model,
+      baseURL: this.baseURL
+    });
   }
   
   validateConfig() {
@@ -65,7 +74,20 @@ class OpenAIProvider extends BaseProvider {
       }
     } catch (error) {
       if (error.response) {
-        throw new Error(`OpenAI API error: ${error.response.data?.error?.message || error.message}`);
+        const status = error.response.status;
+        const errorData = error.response.data?.error;
+        
+        if (status === 401) {
+          throw new Error(
+            `OpenAI API authentication failed (401). Please check:\n\n` +
+            `1. Your API key is correct in Settings → AI Accounts\n` +
+            `2. Your API key hasn't expired or been revoked\n` +
+            `3. You have sufficient credits in your OpenAI account\n\n` +
+            `Error details: ${errorData?.message || 'Invalid API key'}`
+          );
+        }
+        
+        throw new Error(`OpenAI API error: ${errorData?.message || error.message}`);
       }
       throw new Error(`Network error: ${error.message}`);
     }
@@ -137,7 +159,21 @@ class OpenAIProvider extends BaseProvider {
         });
       }).catch(error => {
         if (error.response) {
-          reject(new Error(`OpenAI API error: ${error.response.data?.error?.message || error.message}`));
+          const status = error.response.status;
+          const errorData = error.response.data?.error;
+          
+          if (status === 401) {
+            reject(new Error(
+              `OpenAI API authentication failed (401). Please check:\n\n` +
+              `1. Your API key is correct in Settings → AI Accounts\n` +
+              `2. Your API key hasn't expired or been revoked\n` +
+              `3. You have sufficient credits in your OpenAI account\n\n` +
+              `Error details: ${errorData?.message || 'Invalid API key'}`
+            ));
+            return;
+          }
+          
+          reject(new Error(`OpenAI API error: ${errorData?.message || error.message}`));
         } else {
           reject(new Error(`Network error: ${error.message}`));
         }

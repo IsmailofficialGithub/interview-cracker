@@ -642,6 +642,9 @@
       padding: 32px;
       max-width: 500px;
       width: 90%;
+      pointer-events: auto !important;
+      position: relative;
+      z-index: 1002;
     }
 
     .new-chat-modal-content h2 {
@@ -676,6 +679,13 @@
       border-radius: 6px;
       font-size: 14px;
       font-family: inherit;
+      pointer-events: auto !important;
+    }
+    
+    .new-chat-input-group input:disabled,
+    .new-chat-input-group textarea:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .new-chat-input-group textarea {
@@ -832,12 +842,24 @@
       border-radius: 6px;
       font-size: 14px;
       font-family: inherit;
+      pointer-events: auto !important;
+    }
+
+    .form-group input:disabled,
+    .form-group select:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .form-group input:focus,
     .form-group select:focus {
       outline: none;
       border-color: #0066cc;
+    }
+
+    /* Ensure API key input is always interactive */
+    #account-api-key {
+      pointer-events: auto !important;
     }
 
     .form-group small {
@@ -2351,10 +2373,28 @@
       modal.style.opacity = '1';
       modal.style.zIndex = '1001';
 
+      // Ensure inputs are enabled and accessible
       if (nameInput) {
-        setTimeout(() => nameInput.focus(), 100);
+        nameInput.disabled = false;
+        nameInput.readOnly = false;
+        nameInput.style.pointerEvents = 'auto';
+        nameInput.removeAttribute('disabled');
+        nameInput.removeAttribute('readonly');
+        setTimeout(() => {
+          nameInput.focus();
+          nameInput.click(); // Ensure it's clickable
+        }, 100);
       }
-      console.log('Modal shown');
+      
+      if (contextInput) {
+        contextInput.disabled = false;
+        contextInput.readOnly = false;
+        contextInput.style.pointerEvents = 'auto';
+        contextInput.removeAttribute('disabled');
+        contextInput.removeAttribute('readonly');
+      }
+      
+      console.log('Modal shown, inputs enabled');
     };
 
     window.hideNewChatModal = function () {
@@ -2397,11 +2437,13 @@
 
       // Cancel Button
       if (cancelBtn) {
-        // Remove existing listeners to be safe (by cloning)
-        const newCancelBtn = cancelBtn.cloneNode(true);
-        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-
-        newCancelBtn.addEventListener('click', (e) => {
+        // Use flag to prevent duplicate listeners
+        if (cancelBtn.dataset.listenerAttached === 'true') {
+          return;
+        }
+        cancelBtn.dataset.listenerAttached = 'true';
+        
+        cancelBtn.addEventListener('click', (e) => {
           console.log('Cancel button clicked');
           e.preventDefault();
           e.stopPropagation();
@@ -2418,25 +2460,41 @@
         });
       }
 
-      // Form Submit
+      // Form Submit - use event delegation to avoid cloning issues
       if (form) {
-        // Remove existing listeners
-        const newForm = form.cloneNode(true);
-        form.parentNode.replaceChild(newForm, form);
+        // Use a flag to prevent duplicate listeners
+        if (form.dataset.listenerAttached === 'true') {
+          console.log('Form listener already attached, skipping');
+          return;
+        }
+        form.dataset.listenerAttached = 'true';
 
-        newForm.addEventListener('submit', async (e) => {
+        form.addEventListener('submit', async (e) => {
           console.log('New chat form submitted');
           e.preventDefault();
           e.stopPropagation();
 
-          const nameInput = document.getElementById('new-chat-name');
-          const contextInput = document.getElementById('new-chat-context');
+          // Get inputs directly from the form
+          const nameInput = form.querySelector('#new-chat-name');
+          const contextInput = form.querySelector('#new-chat-context');
+          
+          // Ensure inputs are enabled and accessible
+          if (nameInput) {
+            nameInput.disabled = false;
+            nameInput.readOnly = false;
+            nameInput.style.pointerEvents = 'auto';
+          }
+          if (contextInput) {
+            contextInput.disabled = false;
+            contextInput.readOnly = false;
+            contextInput.style.pointerEvents = 'auto';
+          }
 
           const chatName = nameInput ? nameInput.value.trim() : '';
           const context = contextInput ? contextInput.value.trim() : '';
 
-          const isEditMode = newForm.dataset.mode === 'edit';
-          const editChatId = newForm.dataset.chatId;
+          const isEditMode = form.dataset.mode === 'edit';
+          const editChatId = form.dataset.chatId;
 
           // Determine Chat ID
           const chatId = isEditMode ? editChatId : (chatName || `chat-${Date.now()}`);
@@ -2499,13 +2557,7 @@
           }
         });
 
-        // Ensure submit button triggers form submit
-        const realSubmitBtn = document.getElementById('new-chat-submit');
-        if (realSubmitBtn) {
-          const newSubmitBtn = realSubmitBtn.cloneNode(true);
-          realSubmitBtn.parentNode.replaceChild(newSubmitBtn, realSubmitBtn);
-          // No need to add click listener if type="submit", form submit handles it.
-        }
+        // Submit button is already in the form, no need to clone it separately
       }
     }
 

@@ -3666,6 +3666,27 @@
         return;
       }
 
+      // Validate API key for OpenAI
+      if (providerConfig.type === 'openai' && (!providerConfig.apiKey || !providerConfig.apiKey.trim())) {
+        const errorMsg = `❌ Error: OpenAI account "${providerConfig.name}" is missing an API key.\n\n` +
+          `Please:\n` +
+          `1. Go to Settings → AI Accounts\n` +
+          `2. Edit the account "${providerConfig.name}"\n` +
+          `3. Enter your OpenAI API key\n\n` +
+          `You can get an API key from: https://platform.openai.com/api-keys`;
+        
+        chatUI.addMessage('assistant', errorMsg);
+        if (window.logsPanel) {
+          window.logsPanel.addLog('error', `Chat failed: OpenAI account missing API key`, null, {
+            source: 'Chat',
+            action: 'missing_api_key',
+            accountName: providerConfig.name,
+            providerType: providerConfig.type
+          });
+        }
+        return;
+      }
+
       // Validate that the provider doesn't have a Whisper model (should use chat models)
       const whisperModels = ['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'];
       if (providerConfig.model && whisperModels.includes(providerConfig.model)) {
@@ -3773,6 +3794,29 @@
       }
 
       try {
+        // DEBUG: Log providerConfig before sending to IPC
+        console.log('[DEBUG] Sending providerConfig to IPC:', {
+          name: providerConfig.name,
+          type: providerConfig.type,
+          model: providerConfig.model,
+          hasApiKey: !!providerConfig.apiKey,
+          apiKeyLength: providerConfig.apiKey ? providerConfig.apiKey.length : 0,
+          apiKeyPreview: providerConfig.apiKey ? providerConfig.apiKey.substring(0, 10) + '...' + providerConfig.apiKey.slice(-4) : 'none',
+          hasBaseURL: !!providerConfig.baseURL,
+          baseURL: providerConfig.baseURL || 'none',
+          fullConfig: JSON.stringify({ ...providerConfig, apiKey: providerConfig.apiKey ? '***' + providerConfig.apiKey.slice(-4) : 'none' })
+        });
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', `[DEBUG] ProviderConfig API Key Status: ${providerConfig.apiKey ? 'Present (length: ' + providerConfig.apiKey.length + ')' : 'MISSING'}`, null, {
+            source: 'Chat',
+            action: 'debug_api_key',
+            accountName: providerConfig.name,
+            hasApiKey: !!providerConfig.apiKey,
+            apiKeyLength: providerConfig.apiKey ? providerConfig.apiKey.length : 0
+          });
+        }
+
         // Send to AI via IPC
         let fullContent = '';
         const result = await window.electronAPI.sendAIMessageStream(
