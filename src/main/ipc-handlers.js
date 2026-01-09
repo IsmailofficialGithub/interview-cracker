@@ -1097,7 +1097,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       color: #e0e0e0;
       padding: 6px 12px;
       border-radius: 4px;
-      cursor: pointer;
+      cursor: default;
       font-size: 14px;
       min-width: 32px;
     }
@@ -1123,7 +1123,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       color: #e0e0e0;
       padding: 6px 12px;
       border-radius: 4px;
-      cursor: pointer;
+      cursor: default;
       font-size: 14px;
       min-width: 32px;
     }
@@ -1161,7 +1161,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       border-right: 1px solid #333;
       min-width: 120px;
       max-width: 200px;
-      cursor: pointer;
+      cursor: default;
       user-select: none;
       font-size: 13px;
     }
@@ -1203,7 +1203,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       background: transparent;
       border: none;
       color: #999;
-      cursor: pointer;
+      cursor: default;
     }
     .new-tab-btn:hover {
       background: #333;

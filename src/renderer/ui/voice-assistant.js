@@ -278,7 +278,7 @@ class VoiceAssistant {
         });
 
         // Make sure it's clickable
-        newOption.style.cursor = 'pointer';
+        newOption.style.cursor = 'default';
         newOption.style.pointerEvents = 'auto';
       });
 

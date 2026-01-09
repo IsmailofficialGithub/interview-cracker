@@ -2420,8 +2420,8 @@
                 <strong>${acc.name || 'Untitled Account'}</strong>
                 <span class="account-type">${acc.type}</span>
               </div>
-              <button class="account-edit-btn" data-index="${idx}" style="background: #0066cc; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 8px;">Edit</button>
-              <button class="account-delete-btn" data-index="${idx}" style="background: #cc0000; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Delete</button>
+              <button class="account-edit-btn" data-index="${idx}" style="background: #0066cc; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: default; margin-right: 8px;">Edit</button>
+              <button class="account-delete-btn" data-index="${idx}" style="background: #cc0000; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: default;">Delete</button>
             </div>
           `).join('')}
           ${accounts.length === 0 ? '<p style="color: #999; margin-bottom: 20px;">No accounts configured. Add one below.</p>' : ''}
