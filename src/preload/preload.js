@@ -112,6 +112,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('window-focused', callback);
     return () => ipcRenderer.removeListener('window-focused', callback);
   },
+  onWindowResize: (callback) => {
+    ipcRenderer.on('window-resized', (event, data) => callback(data));
+    return () => ipcRenderer.removeListener('window-resized', callback);
+  },
 
   // Log events from main process
   onLogError: (callback) => {

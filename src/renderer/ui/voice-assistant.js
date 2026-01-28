@@ -49,6 +49,20 @@ class VoiceAssistant {
     this.isToggling = false;
     this.lastErrorTime = 0;
     this.lastErrorMessage = '';
+
+    // Voice Activity Detection (VAD)
+    this.audioContext = null;
+    this.analyserNode = null;
+    this.voiceActivityCheckInterval = null;
+    this.isSpeaking = false;
+    this.silenceStartTime = null;
+    this.silenceDurationThreshold = 1500; // 1.5 seconds of silence before processing
+    this.speechThreshold = -40; // dB threshold for speech detection
+    this.silenceThreshold = -50; // dB threshold for silence detection
+    this.minRecordingDuration = 500; // Minimum 0.5 seconds of recording
+    this.maxRecordingDuration = 30000; // Maximum 30 seconds of recording
+    this.recordingStartTime = null;
+    this.accumulatedChunks = []; // Store chunks while speaking
   }
 
   /**
@@ -538,6 +552,12 @@ class VoiceAssistant {
     this.isActive = false;
     this.isProcessing = false;
 
+    // Stop VAD checking
+    if (this.voiceActivityCheckInterval) {
+      clearInterval(this.voiceActivityCheckInterval);
+      this.voiceActivityCheckInterval = null;
+    }
+
     // Stop recording
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
@@ -554,6 +574,17 @@ class VoiceAssistant {
       this.transcriptionInterval = null;
     }
 
+    // Close AudioContext
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      try {
+        await this.audioContext.close();
+      } catch (error) {
+        console.warn('Error closing AudioContext:', error);
+      }
+      this.audioContext = null;
+      this.analyserNode = null;
+    }
+
     // Stop audio stream
     if (this.audioStream) {
       this.audioStream.getTracks().forEach(track => track.stop());
@@ -562,7 +593,11 @@ class VoiceAssistant {
 
     this.mediaRecorder = null;
     this.audioChunks = [];
+    this.accumulatedChunks = [];
     this.lastProcessedChunkIndex = 0;
+    this.isSpeaking = false;
+    this.silenceStartTime = null;
+    this.recordingStartTime = null;
     this.updateUI();
   }
 
@@ -601,6 +636,21 @@ class VoiceAssistant {
 
       // Initialize chunk storage for the cycle
       this.currentCycleChunks = [];
+      this.accumulatedChunks = [];
+
+      // Create AudioContext for Voice Activity Detection
+      try {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = this.audioContext.createMediaStreamSource(this.audioStream);
+        this.analyserNode = this.audioContext.createAnalyser();
+        this.analyserNode.fftSize = 256;
+        this.analyserNode.smoothingTimeConstant = 0.8;
+        source.connect(this.analyserNode);
+        console.log('AudioContext created for VAD in MINE mode');
+      } catch (error) {
+        console.error('Failed to create AudioContext for VAD:', error);
+        // Continue without VAD if AudioContext fails
+      }
 
       // Create MediaRecorder
       this.mediaRecorder = new MediaRecorder(this.audioStream, {
@@ -611,6 +661,7 @@ class VoiceAssistant {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.currentCycleChunks.push(event.data);
+          this.accumulatedChunks.push(event.data);
         }
       };
 
@@ -618,17 +669,30 @@ class VoiceAssistant {
       this.mediaRecorder.onstop = async () => {
         if (this.currentCycleChunks.length > 0) {
           const blob = new Blob(this.currentCycleChunks, { type: 'audio/webm' });
-          this.currentCycleChunks = []; // Reset for next cycle (though we create new recorder usually)
+          this.currentCycleChunks = []; // Reset for next cycle
           await this.processAudioBlob(blob);
         }
 
-        // Restart if still active
+        // Restart if still active (VAD will detect next speech)
         if (this.isActive) {
-          this.startRecordingCycle();
+          // Small delay before restarting to avoid immediate re-trigger
+          setTimeout(() => {
+            if (this.isActive) {
+              this.startRecordingCycle();
+            }
+          }, 200);
         }
       };
 
-      // Start the first cycle
+      // Start VAD checking interval
+      if (this.analyserNode) {
+        this.voiceActivityCheckInterval = setInterval(() => {
+          this.checkVoiceActivity();
+        }, 100); // Check every 100ms
+        console.log('VAD checking started for MINE mode');
+      }
+
+      // Start the first recording cycle
       this.startRecordingCycle();
 
     } catch (error) {
@@ -637,19 +701,112 @@ class VoiceAssistant {
     }
   }
 
-  // Helper to manage the recording cycle
-  startRecordingCycle() {
-    if (!this.isActive || !this.mediaRecorder || this.mediaRecorder.state !== 'inactive') return;
+  /**
+   * Check voice activity using audio analysis
+   */
+  checkVoiceActivity() {
+    if (!this.analyserNode || !this.isActive) return;
 
-    this.currentCycleChunks = [];
-    this.mediaRecorder.start();
+    try {
+      const dataArray = new Uint8Array(this.analyserNode.frequencyBinCount);
+      this.analyserNode.getByteFrequencyData(dataArray);
 
-    // Record for 2 seconds then stop -> creates a valid file
-    setTimeout(() => {
-      if (this.isActive && this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-        this.mediaRecorder.stop();
+      // Calculate average volume
+      const sum = dataArray.reduce((a, b) => a + b, 0);
+      const average = sum / dataArray.length;
+      
+      // Convert to dB (0-255 range, normalize and convert to dB)
+      // Avoid log(0) by adding small value
+      const normalized = average / 255;
+      const volume = normalized > 0 ? 20 * Math.log10(normalized) : -100;
+
+      const now = Date.now();
+      const recordingDuration = this.recordingStartTime ? now - this.recordingStartTime : 0;
+
+      // Check for maximum recording duration
+      if (recordingDuration >= this.maxRecordingDuration && this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+        console.log('Maximum recording duration reached, processing audio');
+        this.stopRecordingAndProcess();
+        return;
       }
-    }, 2000);
+
+      // Check for minimum recording duration before allowing silence detection
+      const canDetectSilence = recordingDuration >= this.minRecordingDuration;
+
+      if (volume > this.speechThreshold) {
+        // Speech detected
+        if (!this.isSpeaking && canDetectSilence) {
+          console.log('Speech detected, volume:', volume.toFixed(2), 'dB');
+        }
+        this.isSpeaking = true;
+        this.silenceStartTime = null;
+      } else if (volume < this.silenceThreshold) {
+        // Silence detected
+        if (this.isSpeaking && canDetectSilence) {
+          if (!this.silenceStartTime) {
+            this.silenceStartTime = now;
+            console.log('Silence detected, starting silence timer');
+          } else {
+            const silenceDuration = now - this.silenceStartTime;
+            if (silenceDuration >= this.silenceDurationThreshold) {
+              // User stopped speaking - process audio
+              console.log('Silence duration threshold reached, processing audio');
+              this.isSpeaking = false;
+              this.stopRecordingAndProcess();
+              this.silenceStartTime = null;
+            }
+          }
+        } else if (!this.isSpeaking && !this.silenceStartTime) {
+          // Not speaking yet, waiting for speech
+          this.silenceStartTime = null;
+        }
+      }
+    } catch (error) {
+      console.error('Error in voice activity detection:', error);
+    }
+  }
+
+  /**
+   * Stop recording and process accumulated audio
+   */
+  async stopRecordingAndProcess() {
+    if (!this.mediaRecorder || this.mediaRecorder.state !== 'recording') {
+      return;
+    }
+
+    try {
+      // Stop the recorder
+      this.mediaRecorder.stop();
+      
+      // The onstop handler will process the audio
+      // Reset state for next recording
+      this.isSpeaking = false;
+      this.silenceStartTime = null;
+      this.recordingStartTime = null;
+    } catch (error) {
+      console.error('Error stopping recording:', error);
+    }
+  }
+
+  // Helper to manage the recording cycle (now VAD-based)
+  startRecordingCycle() {
+    if (!this.isActive || !this.mediaRecorder) return;
+
+    // If already recording, don't restart
+    if (this.mediaRecorder.state === 'recording') {
+      return;
+    }
+
+    // Reset state
+    this.currentCycleChunks = [];
+    this.accumulatedChunks = [];
+    this.isSpeaking = false;
+    this.silenceStartTime = null;
+    this.recordingStartTime = Date.now();
+
+    // Start recording
+    this.mediaRecorder.start();
+    console.log('Started new recording cycle (VAD-based)');
   }
 
   /**
@@ -725,11 +882,23 @@ class VoiceAssistant {
       // (Simplified: just use the first audio track, assuming system audio)
       this.audioStream = new MediaStream([audioTracks[0]]);
 
-
-
-
       // Initialize chunk storage
       this.currentCycleChunks = [];
+      this.accumulatedChunks = [];
+
+      // Create AudioContext for Voice Activity Detection
+      try {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = this.audioContext.createMediaStreamSource(this.audioStream);
+        this.analyserNode = this.audioContext.createAnalyser();
+        this.analyserNode.fftSize = 256;
+        this.analyserNode.smoothingTimeConstant = 0.8;
+        source.connect(this.analyserNode);
+        console.log('AudioContext created for VAD in YOURS mode');
+      } catch (error) {
+        console.error('Failed to create AudioContext for VAD:', error);
+        // Continue without VAD if AudioContext fails
+      }
 
       // Create MediaRecorder
       this.mediaRecorder = new MediaRecorder(this.audioStream, {
@@ -740,6 +909,7 @@ class VoiceAssistant {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.currentCycleChunks.push(event.data);
+          this.accumulatedChunks.push(event.data);
         }
       };
 
@@ -751,12 +921,26 @@ class VoiceAssistant {
           await this.processAudioBlob(blob);
         }
 
+        // Restart if still active (VAD will detect next speech)
         if (this.isActive) {
-          this.startRecordingCycle();
+          // Small delay before restarting to avoid immediate re-trigger
+          setTimeout(() => {
+            if (this.isActive) {
+              this.startRecordingCycle();
+            }
+          }, 200);
         }
       };
 
-      // Start first cycle
+      // Start VAD checking interval
+      if (this.analyserNode) {
+        this.voiceActivityCheckInterval = setInterval(() => {
+          this.checkVoiceActivity();
+        }, 100); // Check every 100ms
+        console.log('VAD checking started for YOURS mode');
+      }
+
+      // Start first recording cycle
       this.startRecordingCycle();
 
     } catch (error) {

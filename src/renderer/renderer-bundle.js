@@ -52,6 +52,9 @@
       this.chatContainer = document.getElementById('chat-messages');
       this.inputArea = document.getElementById('message-input');
       this.sendButton = document.getElementById('send-button');
+      
+      // Setup scroll to bottom button
+      this.setupScrollButton();
 
       // Real-time listening UI elements
       this.realtimePanel = document.getElementById('realtime-transcription-panel');
@@ -1990,7 +1993,16 @@
 
       this.messages.push(message);
       this.renderMessage(message);
-      this.autoScroll();
+      
+      // Always scroll to bottom when user sends a message
+      // Don't auto-scroll when assistant message is being updated (streaming)
+      if (role === 'user') {
+        this.scrollToBottom();
+      } else {
+        // For assistant messages, only scroll if already near bottom
+        this.autoScroll();
+      }
+      
       this.scheduleAutoSave();
     }
 
@@ -1998,7 +2010,17 @@
       if (this.messages.length > 0 && this.messages[this.messages.length - 1].role === 'assistant') {
         this.messages[this.messages.length - 1].content = content;
         this.rerenderMessages();
+        // Don't auto-scroll during streaming - let user read from first line
+        // Only scroll if they're already at the bottom
         this.autoScroll();
+      }
+    }
+    
+    scrollToBottom() {
+      // Force scroll to bottom (used when user sends message)
+      if (this.chatContainer) {
+        this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+        this.updateScrollButton();
       }
     }
 
@@ -2040,10 +2062,63 @@
           this.renderMessage(msg);
         }
       });
+      
+      // Update scroll button after rerender
+      setTimeout(() => this.updateScrollButton(), 100);
     }
 
     autoScroll() {
-      this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+      // Only auto-scroll if user is already at the bottom (within 50px)
+      const isNearBottom = this.chatContainer.scrollHeight - this.chatContainer.scrollTop - this.chatContainer.clientHeight < 50;
+      if (isNearBottom) {
+        this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+      }
+      this.updateScrollButton();
+    }
+
+    setupScrollButton() {
+      const scrollBtn = document.getElementById('scroll-to-bottom-btn');
+      if (!scrollBtn) return;
+      
+      // Initialize feather icon
+      if (typeof feather !== 'undefined') {
+        feather.replace();
+      }
+      
+      // Click handler to scroll to bottom
+      scrollBtn.addEventListener('click', () => {
+        this.chatContainer.scrollTo({
+          top: this.chatContainer.scrollHeight,
+          behavior: 'smooth'
+        });
+      });
+      
+      // Update button visibility on scroll
+      this.chatContainer.addEventListener('scroll', () => {
+        this.updateScrollButton();
+      });
+      
+      // Initial check
+      this.updateScrollButton();
+      
+      // Update button when content changes
+      const observer = new MutationObserver(() => {
+        this.updateScrollButton();
+      });
+      observer.observe(this.chatContainer, { childList: true, subtree: true });
+    }
+
+    updateScrollButton() {
+      const scrollBtn = document.getElementById('scroll-to-bottom-btn');
+      if (!scrollBtn || !this.chatContainer) return;
+      
+      const isAtBottom = this.chatContainer.scrollHeight - this.chatContainer.scrollTop - this.chatContainer.clientHeight < 10;
+      
+      if (isAtBottom) {
+        scrollBtn.classList.remove('show');
+      } else {
+        scrollBtn.classList.add('show');
+      }
     }
 
     async sendMessage() {

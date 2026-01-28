@@ -396,7 +396,7 @@ class SettingsPanel {
             apiKeyInput.style.pointerEvents = 'auto';
             apiKeyInput.removeAttribute('disabled');
             apiKeyInput.removeAttribute('readonly');
-          }
+        }
         }
         
         // Update model dropdown when provider type changes
@@ -503,7 +503,7 @@ class SettingsPanel {
         
         // Clear and enable all inputs
         if (document.getElementById('account-index')) {
-          document.getElementById('account-index').value = '-1';
+        document.getElementById('account-index').value = '-1';
         }
         if (nameInput) {
           nameInput.value = '';
@@ -607,7 +607,7 @@ class SettingsPanel {
         console.log('API Key input value length:', apiKeyValue.length);
       }
 
-      const account = {
+    const account = {
         name: nameInput.value.trim(),
         type: typeInput.value,
         model: modelValue,
@@ -652,15 +652,15 @@ class SettingsPanel {
         console.error('✗ OpenAI account missing API key!');
       }
 
-      if (!this.config.accounts) {
-        this.config.accounts = [];
-      }
+    if (!this.config.accounts) {
+      this.config.accounts = [];
+    }
 
       if (index >= 0 && index < this.config.accounts.length) {
-        this.config.accounts[index] = account;
-      } else {
-        this.config.accounts.push(account);
-      }
+      this.config.accounts[index] = account;
+    } else {
+      this.config.accounts.push(account);
+    }
 
       const saveResult = await this.saveConfig();
       if (saveResult) {
@@ -710,7 +710,7 @@ class SettingsPanel {
         if (indexInput) indexInput.value = '-1';
         
         // Refresh UI
-        this.hide();
+    this.hide();
         this.show();
         alert('Account saved successfully!');
       }
