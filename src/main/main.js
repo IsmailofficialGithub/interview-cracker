@@ -23,6 +23,8 @@ let currentShortcut = 'Ctrl+Alt+H'; // Hide shortcut
 let ghostTypeShortcut = 'Ctrl+Alt+V'; // Ghost Type shortcut
 let quitShortcut = 'Ctrl+Alt+Q'; // Quit shortcut
 let ghostWpm = 60; // Ghost WPM
+let ghostMistakeChance = 5; // Mistake chance %
+let ghostMaxMistakes = 1; // Max consecutive mistakes
 
 /**
  * Create main application window
@@ -460,7 +462,7 @@ function registerGlobalShortcut() {
 
     // Ghost Type Shortcut
     const retGhost = globalShortcut.register(ghostTypeShortcut, () => {
-      ghostTyper.typeClipboard(ghostWpm);
+      ghostTyper.typeClipboard(ghostWpm, ghostMistakeChance, ghostMaxMistakes);
     });
 
     if (!retGhost) {
@@ -598,6 +600,24 @@ ipcMain.handle('update-ghost-wpm', async (event, wpm) => {
   const newWpm = parseInt(wpm);
   if (!isNaN(newWpm) && newWpm > 0) {
     ghostWpm = newWpm;
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('update-ghost-mistake-chance', async (event, chance) => {
+  const newChance = parseInt(chance);
+  if (!isNaN(newChance) && newChance >= 0 && newChance <= 100) {
+    ghostMistakeChance = newChance;
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('update-ghost-max-mistakes', async (event, max) => {
+  const newMax = parseInt(max);
+  if (!isNaN(newMax) && newMax >= 1) {
+    ghostMaxMistakes = newMax;
     return true;
   }
   return false;

@@ -2035,6 +2035,64 @@
       const html = window.electronAPI.renderMarkdown(message.content);
       contentDiv.innerHTML = html;
 
+      // Enhance code blocks for assistant messages (and user messages if they contain code)
+      const preElements = contentDiv.querySelectorAll('pre');
+      if (preElements.length > 0) {
+        preElements.forEach(pre => {
+          // Avoid double wrapping
+          if (pre.parentNode.classList.contains('code-block-wrapper')) return;
+
+          const code = pre.querySelector('code');
+          let lang = 'text';
+          if (code) {
+            const langClass = Array.from(code.classList).find(c => c.startsWith('language-'));
+            if (langClass) lang = langClass.replace('language-', '');
+          }
+
+          // Create wrapper structure
+          const wrapper = document.createElement('div');
+          wrapper.className = 'code-block-wrapper';
+
+          const header = document.createElement('div');
+          header.className = 'code-header';
+          header.innerHTML = `
+            <span class="code-lang">${lang}</span>
+            <button class="copy-btn">Copy</button>
+          `;
+
+          // Insert wrapper before pre
+          if (pre.parentNode) {
+            pre.parentNode.insertBefore(wrapper, pre);
+            // Move pre into wrapper
+            wrapper.appendChild(header);
+            wrapper.appendChild(pre);
+
+            // Add copy event listener
+            const copyBtn = header.querySelector('.copy-btn');
+            copyBtn.addEventListener('click', async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const textToCopy = code ? code.innerText : pre.innerText;
+
+              try {
+                await navigator.clipboard.writeText(textToCopy);
+                const originalText = 'Copy';
+                copyBtn.textContent = 'Copied!';
+                copyBtn.classList.add('copied');
+
+                setTimeout(() => {
+                  copyBtn.textContent = originalText;
+                  copyBtn.classList.remove('copied');
+                }, 2000);
+              } catch (err) {
+                console.error('Failed to copy code:', err);
+                copyBtn.textContent = 'Error';
+              }
+            });
+          }
+        });
+      }
+
       const timestampDiv = document.createElement('div');
       timestampDiv.className = 'message-timestamp';
       const date = new Date(message.timestamp);
@@ -2426,6 +2484,19 @@
         const result = await window.electronAPI.getConfig();
         if (result.success) {
           this.config = result.data || { accounts: [], settings: {} };
+
+          // Sync settings with main process
+          if (this.config.settings) {
+            if (this.config.settings.ghostWpm) {
+              window.electronAPI.updateGhostWpm(this.config.settings.ghostWpm);
+            }
+            if (this.config.settings.ghostMistakeChance !== undefined) {
+              window.electronAPI.updateGhostMistakeChance(this.config.settings.ghostMistakeChance);
+            }
+            if (this.config.settings.ghostMaxMistakes !== undefined) {
+              window.electronAPI.updateGhostMaxMistakes(this.config.settings.ghostMaxMistakes);
+            }
+          }
         } else {
           this.config = { accounts: [], settings: {} };
         }
@@ -2614,6 +2685,20 @@
              <div style="display: flex; align-items: center; gap: 10px;">
                <input type="number" id="ghost-wpm" value="${settings.ghostWpm || 60}" min="10" max="200" style="width: 80px; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 6px; border-radius: 6px;" />
                <small style="color: #888;">(Higher is faster)</small>
+             </div>
+          </div>
+          <div class="setting-item" style="margin-bottom: 16px;">
+             <label style="display: block; margin-bottom: 5px;">Mistake Chance (%):</label>
+             <div style="display: flex; align-items: center; gap: 10px;">
+               <input type="number" id="ghost-mistake-chance" value="${settings.ghostMistakeChance !== undefined ? settings.ghostMistakeChance : 5}" min="0" max="100" style="width: 80px; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 6px; border-radius: 6px;" />
+               <small style="color: #888;">(0 = Perfect typing)</small>
+             </div>
+          </div>
+          <div class="setting-item" style="margin-bottom: 16px;">
+             <label style="display: block; margin-bottom: 5px;">Max Consecutive Mistakes:</label>
+             <div style="display: flex; align-items: center; gap: 10px;">
+               <input type="number" id="ghost-max-mistakes" value="${settings.ghostMaxMistakes || 1}" min="1" max="5" style="width: 80px; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 6px; border-radius: 6px;" />
+               <small style="color: #888;">(Max wrong chars at once)</small>
              </div>
           </div>
         </div>
@@ -3092,6 +3177,24 @@
         if (newGhostWpm && this.config.settings.ghostWpm !== newGhostWpm) {
           this.config.settings.ghostWpm = newGhostWpm;
           await window.electronAPI.updateGhostWpm(newGhostWpm);
+        }
+      }
+
+      const mistakeChanceInput = document.getElementById('ghost-mistake-chance');
+      if (mistakeChanceInput) {
+        const newChance = parseInt(mistakeChanceInput.value);
+        if (!isNaN(newChance) && this.config.settings.ghostMistakeChance !== newChance) {
+          this.config.settings.ghostMistakeChance = newChance;
+          await window.electronAPI.updateGhostMistakeChance(newChance);
+        }
+      }
+
+      const maxMistakesInput = document.getElementById('ghost-max-mistakes');
+      if (maxMistakesInput) {
+        const newMax = parseInt(maxMistakesInput.value);
+        if (newMax && this.config.settings.ghostMaxMistakes !== newMax) {
+          this.config.settings.ghostMaxMistakes = newMax;
+          await window.electronAPI.updateGhostMaxMistakes(newMax);
         }
       }
 
