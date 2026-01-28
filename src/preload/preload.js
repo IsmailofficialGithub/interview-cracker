@@ -112,6 +112,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('window-focused', callback);
     return () => ipcRenderer.removeListener('window-focused', callback);
   },
+  onWindowResize: (callback) => {
+    ipcRenderer.on('window-resized', (event, data) => callback(data));
+    return () => ipcRenderer.removeListener('window-resized', callback);
+  },
 
   // Log events from main process
   onLogError: (callback) => {
@@ -146,8 +150,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateGhostShortcut: (shortcut) => ipcRenderer.invoke('update-ghost-shortcut', shortcut),
   updateQuitShortcut: (shortcut) => ipcRenderer.invoke('update-quit-shortcut', shortcut),
   updateGhostWpm: (wpm) => ipcRenderer.invoke('update-ghost-wpm', wpm),
-  updateGhostMistakeChance: (chance) => ipcRenderer.invoke('update-ghost-mistake-chance', chance),
-  updateGhostMaxMistakes: (max) => ipcRenderer.invoke('update-ghost-max-mistakes', max)
+
+  // Desktop Apps
+  getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),
+  launchApp: (appPath, tabId) => ipcRenderer.invoke('launch-app', appPath, tabId),
+  switchTab: (fromTabId, toTabId) => ipcRenderer.invoke('switch-tab', fromTabId, toTabId),
+  closeTab: (tabId) => ipcRenderer.invoke('close-tab', tabId),
+  resizeEmbeddedWindow: (tabId, width, height) => ipcRenderer.invoke('resize-embedded-window', tabId, width, height),
+  moveEmbeddedWindow: (tabId, x, y) => ipcRenderer.invoke('move-embedded-window', tabId, x, y),
+
+  // Desktop Apps events
+  onEmbeddedWindowClosed: (callback) => {
+    ipcRenderer.on('embedded-window-closed', (event, data) => callback(data));
+    return () => ipcRenderer.removeListener('embedded-window-closed', callback);
+  }
 });
 
 // Log that preload script loaded (for debugging)

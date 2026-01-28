@@ -7,1791 +7,15 @@
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self' https:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; webview-src *; frame-src *;">
   <title>Noctisai</title>
-  <script src="https://unpkg.com/feather-icons"></script>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: #1a1a1a;
-      color: #e0e0e0;
-      height: 100vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Main content area - split view when browser is open */
-    .main-content {
-      flex: 1;
-      display: flex;
-      overflow: hidden;
-      min-height: 0;
-      position: relative;
-    }
-
-    body.blurred #chat-container {
-      filter: blur(10px);
-      opacity: 0.3;
-      pointer-events: none;
-    }
-
-    /* Loading state for voice mode toggle */
-    .voice-mode-toggle.loading {
-      opacity: 0.6;
-      pointer-events: none;
-      position: relative;
-    }
-
-    .voice-mode-toggle.loading::after {
-      content: 'Loading...';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0, 0, 0, 0.9);
-      color: #fff;
-      padding: 8px 16px;
-      border-radius: 4px;
-      font-size: 12px;
-      z-index: 1000;
-      white-space: nowrap;
-      pointer-events: none;
-    }
-
-    .toggle-option.loading {
-      opacity: 0.5;
-      cursor: wait;
-    }
-
-    .toggle-option.loading::before {
-      content: '⏳';
-      margin-right: 4px;
-    }
-
-    /* Header */
-    .header {
-      background: #252525;
-      border-bottom: 1px solid #333;
-      padding: 12px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .header-title {
-      font-size: 16px;
-      font-weight: 600;
-    }
-
-    .header-controls {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .provider-selector {
-      background: #333;
-      color: #e0e0e0;
-      border: 1px solid #444;
-      padding: 6px 12px;
-      border-radius: 4px;
-      font-size: 14px;
-    }
-
-    .settings-button {
-      background: #333;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-
-    .settings-button:hover {
-      background: #3a3a3a;
-    }
-
-    /* Chat Container */
-    #chat-container {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      min-width: 0;
-      transition: display 0.3s ease;
-    }
-
-    body.browser-open #chat-container {
-      display: none;
-    }
-
-    #chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    /* Scrollbar */
-    #chat-messages::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    #chat-messages::-webkit-scrollbar-track {
-      background: #1a1a1a;
-    }
-
-    #chat-messages::-webkit-scrollbar-thumb {
-      background: #444;
-      border-radius: 4px;
-    }
-
-    #chat-messages::-webkit-scrollbar-thumb:hover {
-      background: #555;
-    }
-
-    /* Messages */
-    .message {
-      max-width: 75%;
-      padding: 12px 16px;
-      border-radius: 12px;
-      word-wrap: break-word;
-    }
-
-    .message-user {
-      align-self: flex-end;
-      background: #0066cc;
-      color: white;
-      border-bottom-right-radius: 4px;
-    }
-
-    .message-assistant {
-      align-self: flex-start;
-      background: #2a2a2a;
-      border: 1px solid #333;
-      border-bottom-left-radius: 4px;
-    }
-
-    .message-content {
-      line-height: 1.6;
-    }
-
-    .message-content p {
-      margin: 0.5em 0;
-    }
-
-    .message-content p:first-child {
-      margin-top: 0;
-    }
-
-    .message-content p:last-child {
-      margin-bottom: 0;
-    }
-
-    .message-content code {
-      background: rgba(0, 0, 0, 0.3);
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-family: 'Courier New', monospace;
-      font-size: 0.9em;
-    }
-
-    .message-content pre {
-      background: rgba(0, 0, 0, 0.3);
-      padding: 12px;
-      border-radius: 6px;
-      overflow-x: auto;
-      margin: 0.5em 0;
-    }
-
-    .message-content pre code {
-      background: none;
-      padding: 0;
-    }
-
-    .message-timestamp {
-      font-size: 11px;
-      opacity: 0.6;
-      margin-top: 6px;
-    }
-
-    /* Input Area */
-    .input-area {
-      background: #252525;
-      border-top: 1px solid #333;
-      padding: 16px;
-      display: flex;
-      gap: 12px;
-      flex-shrink: 0;
-    }
-
-    #message-input {
-      flex: 1;
-      background: #1a1a1a;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 12px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-      resize: none;
-      min-height: 44px;
-      max-height: 200px;
-    }
-
-    #message-input:focus {
-      outline: none;
-      border-color: #0066cc;
-    }
-
-    #send-button {
-      background: #0066cc;
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-    }
-
-    #send-button:hover {
-      background: #0052a3;
-    }
-
-    #send-button:active {
-      background: #003d7a;
-    }
-
-    /* Listen Button */
-    #listen-button {
-      background: #28a745;
-      color: white;
-      border: none;
-      padding: 12px 20px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      transition: all 0.2s;
-    }
-
-    #listen-button:hover {
-      background: #218838;
-    }
-
-    #listen-button:active {
-      background: #1e7e34;
-    }
-
-    #listen-button.listening {
-      background: #dc3545;
-      animation: pulse 1.5s infinite;
-    }
-
-    #listen-button.listening:hover {
-      background: #c82333;
-    }
-
-    @keyframes pulse {
-
-      0%,
-      100% {
-        opacity: 1;
-      }
-
-      50% {
-        opacity: 0.7;
-      }
-    }
-
-    /* Voice status indicator */
-    .voice-status {
-      position: fixed;
-      bottom: 80px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.95);
-      color: #fff;
-      padding: 16px 24px;
-      border-radius: 8px;
-      font-size: 14px;
-      z-index: 1000;
-      display: none;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-      max-width: 500px;
-      text-align: center;
-    }
-
-    .voice-status.active {
-      display: block;
-    }
-
-    .voice-status .voice-text {
-      margin-top: 8px;
-      color: #4caf50;
-      font-weight: 500;
-    }
-
-    .voice-status.error {
-      background: rgba(220, 53, 69, 0.95);
-    }
-
-    /* Voice Assistant Status */
-    .voice-assistant-status {
-      position: fixed;
-      bottom: 80px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.95);
-      color: #fff;
-      padding: 16px 24px;
-      border-radius: 8px;
-      font-size: 14px;
-      z-index: 1001;
-      display: none;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-      max-width: 500px;
-      text-align: center;
-      min-width: 300px;
-    }
-
-    .voice-assistant-status.active {
-      display: block;
-    }
-
-    .voice-assistant-status.error {
-      background: rgba(220, 53, 69, 0.95);
-    }
-
-    .voice-assistant-status .status-mode {
-      font-weight: 600;
-      margin-bottom: 8px;
-      font-size: 16px;
-    }
-
-    .voice-assistant-status .status-text {
-      color: #4caf50;
-      margin-bottom: 8px;
-    }
-
-    .voice-assistant-status .status-transcript {
-      margin-top: 12px;
-      padding: 8px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-      font-size: 13px;
-      text-align: left;
-      max-height: 100px;
-      overflow-y: auto;
-    }
-
-    .voice-assistant-status .status-error {
-      color: #fff;
-      font-weight: 500;
-    }
-
-    /* Icon styles */
-    .icon {
-      width: 16px;
-      height: 16px;
-      stroke-width: 2;
-      vertical-align: middle;
-      display: inline-block;
-    }
-
-    .icon-small {
-      width: 14px;
-      height: 14px;
-    }
-
-    .icon-large {
-      width: 20px;
-      height: 20px;
-    }
-
-    /* Voice Mode Toggle Switch */
-    .voice-mode-toggle {
-      background: #1a1a1a;
-      border: 2px solid #444;
-      border-radius: 8px;
-      padding: 4px;
-      cursor: pointer;
-      display: inline-flex;
-      flex-shrink: 0;
-      min-width: 180px;
-      position: relative;
-      transition: all 0.2s;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-      user-select: none;
-      pointer-events: auto !important;
-      z-index: 10;
-    }
-
-    .voice-mode-toggle:hover {
-      border-color: #555;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-    }
-
-    .voice-mode-toggle:focus {
-      outline: 2px solid #4a9eff;
-      outline-offset: 2px;
-    }
-
-    .toggle-option {
-      flex: 1;
-      padding: 10px 16px;
-      text-align: center;
-      font-size: 14px;
-      font-weight: 600;
-      color: #999;
-      border-radius: 6px;
-      transition: all 0.2s;
-      user-select: none;
-      position: relative;
-      z-index: 2;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      cursor: pointer;
-      pointer-events: auto !important;
-    }
-
-    .toggle-option .icon,
-    .toggle-option svg,
-    .toggle-option i {
-      width: 14px;
-      height: 14px;
-      pointer-events: none;
-    }
-
-    /* Allow pointer events on the toggle option itself, but not children */
-    .toggle-option *:not(.toggle-option) {
-      pointer-events: none;
-    }
-
-    .toggle-option.active {
-      background: #0066cc;
-      color: #ffffff;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-
-    .voice-mode-toggle.yours-mode .toggle-option[data-mode="yours"] {
-      background: #28a745;
-      color: #ffffff;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-
-    .voice-mode-toggle.yours-mode .toggle-option[data-mode="mine"] {
-      background: transparent;
-      color: #999;
-    }
-
-    .voice-mode-toggle:not(.yours-mode) .toggle-option[data-mode="mine"] {
-      background: #0066cc;
-      color: #ffffff;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-
-    .voice-mode-toggle:not(.yours-mode) .toggle-option[data-mode="yours"] {
-      background: transparent;
-      color: #999;
-    }
-
-    /* Auth Modal */
-    .auth-modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-
-    .auth-modal-content {
-      background: #252525;
-      border: 1px solid #444;
-      border-radius: 12px;
-      padding: 32px;
-      max-width: 400px;
-      width: 90%;
-    }
-
-    .auth-modal-content h2 {
-      margin-bottom: 8px;
-      font-size: 24px;
-    }
-
-    .auth-modal-description {
-      margin-bottom: 24px;
-      opacity: 0.8;
-      font-size: 14px;
-    }
-
-    .auth-input-group {
-      margin-bottom: 20px;
-    }
-
-    .auth-input-group label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 14px;
-      font-weight: 500;
-    }
-
-    .auth-input-group input {
-      width: 100%;
-      background: #1a1a1a;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 14px;
-      font-family: inherit;
-    }
-
-    .auth-input-group input:focus {
-      outline: none;
-      border-color: #0066cc;
-    }
-
-    .password-strength {
-      margin-top: 8px;
-      font-size: 12px;
-      padding: 4px 8px;
-      border-radius: 4px;
-    }
-
-    .password-strength.weak {
-      background: rgba(255, 0, 0, 0.2);
-      color: #ff6b6b;
-    }
-
-    .password-strength.medium {
-      background: rgba(255, 193, 7, 0.2);
-      color: #ffc107;
-    }
-
-    .password-strength.strong {
-      background: rgba(76, 175, 80, 0.2);
-      color: #4caf50;
-    }
-
-    .auth-error {
-      background: rgba(255, 0, 0, 0.2);
-      color: #ff6b6b;
-      padding: 12px;
-      border-radius: 6px;
-      margin-bottom: 16px;
-      font-size: 14px;
-    }
-
-    .auth-submit-btn {
-      width: 100%;
-      background: #0066cc;
-      color: white;
-      border: none;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 16px;
-      font-weight: 500;
-      cursor: pointer;
-    }
-
-    .auth-submit-btn:hover {
-      background: #0052a3;
-    }
-
-    .auth-submit-btn:disabled {
-      background: #444;
-      cursor: not-allowed;
-    }
-
-    /* New Chat Modal */
-    .new-chat-modal-overlay {
-      position: fixed !important;
-      top: 0 !important;
-      left: 0 !important;
-      right: 0 !important;
-      bottom: 0 !important;
-      background: rgba(0, 0, 0, 0.8) !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      z-index: 1001 !important;
-    }
-
-    .new-chat-modal-content {
-      background: #252525;
-      border: 1px solid #444;
-      border-radius: 12px;
-      padding: 32px;
-      max-width: 500px;
-      width: 90%;
-    }
-
-    .new-chat-modal-content h2 {
-      margin-bottom: 8px;
-      font-size: 24px;
-    }
-
-    .new-chat-modal-description {
-      margin-bottom: 24px;
-      opacity: 0.8;
-      font-size: 14px;
-    }
-
-    .new-chat-input-group {
-      margin-bottom: 20px;
-    }
-
-    .new-chat-input-group label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 14px;
-      font-weight: 500;
-    }
-
-    .new-chat-input-group input,
-    .new-chat-input-group textarea {
-      width: 100%;
-      background: #1a1a1a;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 14px;
-      font-family: inherit;
-    }
-
-    .new-chat-input-group textarea {
-      min-height: 100px;
-      resize: vertical;
-    }
-
-    .new-chat-input-group input:focus,
-    .new-chat-input-group textarea:focus {
-      outline: none;
-      border-color: #0066cc;
-    }
-
-    .new-chat-input-group small {
-      display: block;
-      margin-top: 4px;
-      font-size: 12px;
-      opacity: 0.7;
-    }
-
-    .new-chat-submit-btn,
-    .new-chat-cancel-btn {
-      padding: 10px 20px;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-      border: none;
-    }
-
-    .new-chat-submit-btn {
-      background: #0066cc;
-      color: white;
-    }
-
-    .new-chat-submit-btn:hover {
-      background: #0052a3;
-    }
-
-    .new-chat-cancel-btn {
-      background: #333;
-      color: #e0e0e0;
-      margin-left: 8px;
-    }
-
-    .new-chat-cancel-btn:hover {
-      background: #3a3a3a;
-    }
-
-    /* Settings Panel */
-    .settings-panel-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-
-    .settings-panel-content {
-      background: #252525;
-      border: 1px solid #444;
-      border-radius: 12px;
-      width: 90%;
-      max-width: 600px;
-      max-height: 80vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .settings-header {
-      padding: 20px;
-      border-bottom: 1px solid #333;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .settings-header h2 {
-      font-size: 20px;
-    }
-
-    .settings-close-btn {
-      background: none;
-      border: none;
-      color: #e0e0e0;
-      font-size: 28px;
-      cursor: pointer;
-      padding: 0;
-      width: 32px;
-      height: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .settings-close-btn:hover {
-      color: #fff;
-    }
-
-    .settings-body {
-      padding: 20px;
-      overflow-y: auto;
-      flex: 1;
-    }
-
-    .settings-tabs {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 24px;
-      border-bottom: 1px solid #333;
-    }
-
-    .settings-tab {
-      background: none;
-      border: none;
-      color: #999;
-      padding: 12px 16px;
-      cursor: pointer;
-      font-size: 14px;
-      border-bottom: 2px solid transparent;
-    }
-
-    .settings-tab:hover {
-      color: #e0e0e0;
-    }
-
-    .settings-tab.active {
-      color: #0066cc;
-      border-bottom-color: #0066cc;
-    }
-
-    .form-group {
-      margin-bottom: 20px;
-    }
-
-    .form-group label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 14px;
-      font-weight: 500;
-    }
-
-    .form-group input,
-    .form-group select {
-      width: 100%;
-      background: #1a1a1a;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 10px;
-      border-radius: 6px;
-      font-size: 14px;
-      font-family: inherit;
-    }
-
-    .form-group input:focus,
-    .form-group select:focus {
-      outline: none;
-      border-color: #0066cc;
-    }
-
-    .form-group small {
-      display: block;
-      margin-top: 4px;
-      font-size: 12px;
-      opacity: 0.7;
-    }
-
-    .save-btn,
-    .cancel-btn {
-      padding: 10px 20px;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-      border: none;
-    }
-
-    .save-btn {
-      background: #0066cc;
-      color: white;
-    }
-
-    .save-btn:hover {
-      background: #0052a3;
-    }
-
-    .cancel-btn {
-      background: #333;
-      color: #e0e0e0;
-      margin-left: 8px;
-    }
-
-    .cancel-btn:hover {
-      background: #3a3a3a;
-    }
-
-    .account-item {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 12px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .account-info strong {
-      display: block;
-      margin-bottom: 4px;
-    }
-
-    .account-type {
-      font-size: 12px;
-      opacity: 0.7;
-    }
-
-    .add-account-btn {
-      width: 100%;
-      background: #333;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      margin-top: 16px;
-    }
-
-    .add-account-btn:hover {
-      background: #3a3a3a;
-    }
-
-    /* Logs Panel */
-    .logs-panel-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-
-    .logs-panel-content {
-      background: #252525;
-      border: 1px solid #444;
-      border-radius: 12px;
-      width: 90%;
-      max-width: 800px;
-      max-height: 80vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .logs-header {
-      padding: 20px;
-      border-bottom: 1px solid #333;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .logs-header h2 {
-      font-size: 20px;
-      margin: 0;
-    }
-
-    .logs-controls {
-      display: flex;
-      gap: 8px;
-    }
-
-    .logs-copy-btn,
-    .logs-clear-btn,
-    .logs-close-btn {
-      background: #333;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      transition: background 0.2s, transform 0.1s;
-    }
-
-    .logs-copy-btn:hover {
-      background: #0066cc;
-      border-color: #0066cc;
-    }
-
-    .logs-clear-btn:hover {
-      background: #cc0000;
-      border-color: #cc0000;
-    }
-
-    .logs-close-btn:hover {
-      background: #3a3a3a;
-    }
-
-    .logs-copy-btn:active {
-      transform: scale(0.98);
-    }
-
-    .logs-body {
-      padding: 20px;
-      overflow-y: auto;
-      flex: 1;
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-    }
-
-    .log-entry {
-      margin-bottom: 12px;
-      padding: 8px 12px;
-      border-left: 3px solid #444;
-      background: #1a1a1a;
-      border-radius: 4px;
-    }
-
-    .log-entry.error {
-      border-left-color: #dc3545;
-      background: rgba(220, 53, 69, 0.1);
-    }
-
-    .log-entry.warning {
-      border-left-color: #ffc107;
-      background: rgba(255, 193, 7, 0.1);
-    }
-
-    .log-entry.info {
-      border-left-color: #0066cc;
-      background: rgba(0, 102, 204, 0.1);
-    }
-
-    .log-entry.success {
-      border-left-color: #28a745;
-      background: rgba(40, 167, 69, 0.1);
-    }
-
-    .log-timestamp {
-      color: #999;
-      font-size: 11px;
-      margin-bottom: 4px;
-    }
-
-    .log-level {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-size: 10px;
-      font-weight: bold;
-      margin-right: 8px;
-      text-transform: uppercase;
-    }
-
-    .log-level.error {
-      background: #dc3545;
-      color: white;
-    }
-
-    .log-level.warning {
-      background: #ffc107;
-      color: #000;
-    }
-
-    .log-level.info {
-      background: #0066cc;
-      color: white;
-    }
-
-    .log-level.success {
-      background: #28a745;
-      color: white;
-    }
-
-    .log-message {
-      color: #e0e0e0;
-      margin-top: 4px;
-      word-wrap: break-word;
-    }
-
-    .log-details {
-      margin-top: 8px;
-      padding: 8px;
-      background: rgba(0, 0, 0, 0.3);
-      border-radius: 4px;
-      font-size: 11px;
-      color: #999;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-
-    .log-details pre {
-      margin: 0;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
-
-    .logs-filter {
-      padding: 12px 20px;
-      border-bottom: 1px solid #333;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .logs-filter select {
-      background: #1a1a1a;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 6px 12px;
-      border-radius: 4px;
-      font-size: 14px;
-    }
-
-    .logs-empty {
-      text-align: center;
-      color: #999;
-      padding: 40px;
-    }
-
-    /* Chat Sidebar */
-    .chats-sidebar {
-      position: fixed;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 280px;
-      background: #252525;
-      border-right: 1px solid #333;
-      display: flex;
-      flex-direction: column;
-      z-index: 100;
-      transition: transform 0.3s ease;
-      box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
-    }
-
-    .chats-sidebar.hidden {
-      transform: translateX(-100%);
-    }
-
-    .chats-header {
-      padding: 16px;
-      border-bottom: 1px solid #333;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .chats-header h3 {
-      font-size: 18px;
-      margin: 0;
-      font-weight: 600;
-    }
-
-    .chats-close-btn {
-      background: none;
-      border: none;
-      color: #e0e0e0;
-      font-size: 24px;
-      cursor: pointer;
-      padding: 0;
-      width: 28px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 4px;
-      transition: background 0.2s;
-    }
-
-    .chats-close-btn:hover {
-      background: #333;
-      color: #fff;
-    }
-
-    .chats-actions {
-      padding: 12px 16px;
-      border-bottom: 1px solid #333;
-      flex-shrink: 0;
-    }
-
-    .new-chat-btn {
-      width: 100%;
-      background: #0066cc;
-      color: white;
-      border: none;
-      padding: 10px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      transition: background 0.2s;
-    }
-
-    .new-chat-btn:hover {
-      background: #0052a3;
-    }
-
-    .chats-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 8px;
-    }
-
-    .chats-list::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    .chats-list::-webkit-scrollbar-track {
-      background: #1a1a1a;
-    }
-
-    .chats-list::-webkit-scrollbar-thumb {
-      background: #444;
-      border-radius: 3px;
-    }
-
-    .chats-list::-webkit-scrollbar-thumb:hover {
-      background: #555;
-    }
-
-    .chat-item {
-      padding: 12px;
-      margin-bottom: 4px;
-      border-radius: 6px;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      transition: background 0.2s;
-      position: relative;
-    }
-
-    .chat-item:hover {
-      background: #333;
-    }
-
-    .chat-item.active {
-      background: #0066cc;
-    }
-
-    .chat-item.active:hover {
-      background: #0052a3;
-    }
-
-    .chat-item-info {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .chat-item-name {
-      font-size: 14px;
-      font-weight: 500;
-      color: #e0e0e0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin-bottom: 4px;
-    }
-
-    .chat-item.active .chat-item-name {
-      color: white;
-    }
-
-    .chat-item-preview {
-      font-size: 12px;
-      color: #999;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin-bottom: 4px;
-    }
-
-    .chat-item.active .chat-item-preview {
-      color: rgba(255, 255, 255, 0.8);
-    }
-
-    .chat-item-date {
-      font-size: 11px;
-      color: #666;
-      margin-top: 4px;
-    }
-
-    .chat-item.active .chat-item-date {
-      color: rgba(255, 255, 255, 0.7);
-    }
-
-    .chat-item-actions {
-      display: flex;
-      gap: 4px;
-      opacity: 0;
-      transition: opacity 0.2s;
-      margin-left: 8px;
-      flex-shrink: 0;
-    }
-
-    .chat-item:hover .chat-item-actions {
-      opacity: 1;
-    }
-
-    .chat-item.active .chat-item-actions {
-      opacity: 1;
-    }
-
-    .chat-delete-btn {
-      background: none;
-      border: none;
-      color: #ff6b6b;
-      cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 16px;
-      transition: background 0.2s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .chat-delete-btn:hover {
-      background: rgba(255, 107, 107, 0.2);
-    }
-
-    .chat-item.active .chat-delete-btn {
-      color: rgba(255, 255, 255, 0.9);
-    }
-
-    .chat-item.active .chat-delete-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-    }
-
-    .chats-empty {
-      text-align: center;
-      color: #999;
-      padding: 40px 20px;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    body.sidebar-open #chat-container {
-      margin-left: 280px;
-      transition: margin-left 0.3s ease;
-    }
-
-    body.sidebar-open .chats-sidebar {
-      display: flex !important;
-    }
-
-    body.sidebar-open.browser-open #browser-view {
-      margin-left: 0;
-    }
-
-    /* Browser View */
-    #browser-view {
-      display: none;
-      flex-direction: column;
-      flex: 1;
-      width: 100%;
-      height: 100%;
-      background: #1a1a1a;
-      min-width: 0;
-      overflow: hidden;
-    }
-
-    body.browser-open #browser-view {
-      display: flex;
-      width: 100%;
-      flex: 1 1 100%;
-    }
-
-    body.browser-open .main-content {
-      width: 100%;
-    }
-
-    .browser-toolbar {
-      background: #252525;
-      border-bottom: 1px solid #333;
-      padding: 8px 12px;
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .browser-nav-btn {
-      background: #333;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      min-width: 32px;
-    }
-
-    .browser-nav-btn:hover {
-      background: #3a3a3a;
-    }
-
-    .browser-nav-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .browser-url-bar {
-      flex: 1;
-      background: #1a1a1a;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-size: 14px;
-      font-family: inherit;
-    }
-
-    .browser-url-bar:focus {
-      outline: none;
-      border-color: #4a9eff;
-    }
-
-    .browser-refresh-btn {
-      background: #333;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      min-width: 32px;
-    }
-
-    .browser-refresh-btn:hover {
-      background: #3a3a3a;
-    }
-
-    .browser-close-btn {
-      background: #333;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-
-    .browser-close-btn:hover {
-      background: #ff4444;
-      border-color: #ff4444;
-    }
-
-    #browser-webview {
-      flex: 1;
-      width: 100%;
-      background: white;
-      border: none;
-    }
-
-    .browser-loading {
-      display: none;
-      position: absolute;
-      top: 50px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.8);
-      color: white;
-      padding: 8px 16px;
-      border-radius: 4px;
-      font-size: 12px;
-      z-index: 1000;
-    }
-
-    .browser-loading.active {
-      display: block;
-    }
-
-    /* Browser Tabs */
-    .browser-tabs-container {
-      background: #1f1f1f;
-      border-bottom: 1px solid #333;
-      display: flex;
-      align-items: center;
-      padding: 0 8px;
-      gap: 4px;
-      overflow-x: auto;
-      flex-shrink: 0;
-      min-height: 36px;
-    }
-
-    .browser-tabs-container::-webkit-scrollbar {
-      height: 4px;
-    }
-
-    .browser-tabs-container::-webkit-scrollbar-track {
-      background: #1f1f1f;
-    }
-
-    .browser-tabs-container::-webkit-scrollbar-thumb {
-      background: #444;
-      border-radius: 2px;
-    }
-
-    .browser-tab {
-      background: #2a2a2a;
-      border: 1px solid #333;
-      border-bottom: none;
-      color: #e0e0e0;
-      padding: 8px 16px;
-      cursor: pointer;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 120px;
-      max-width: 240px;
-      position: relative;
-      border-radius: 8px 8px 0 0;
-      transition: background 0.2s;
-    }
-
-    .browser-tab:hover {
-      background: #333;
-    }
-
-    .browser-tab.active {
-      background: #252525;
-      border-color: #0066cc;
-      border-bottom-color: #252525;
-      z-index: 1;
-    }
-
-    .browser-tab-title {
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .browser-tab-close {
-      background: none;
-      border: none;
-      color: #999;
-      cursor: pointer;
-      padding: 2px 4px;
-      border-radius: 3px;
-      font-size: 16px;
-      line-height: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 18px;
-      height: 18px;
-      transition: background 0.2s, color 0.2s;
-    }
-
-    .browser-tab-close:hover {
-      background: rgba(255, 255, 255, 0.1);
-      color: #fff;
-    }
-
-    .browser-tab-icon {
-      width: 16px;
-      height: 16px;
-      flex-shrink: 0;
-    }
-
-    .browser-tab-incognito {
-      opacity: 0.7;
-    }
-
-    .browser-tab-incognito-icon {
-      width: 12px;
-      height: 12px;
-      margin-right: 4px;
-      opacity: 0.7;
-      vertical-align: middle;
-    }
-
-    .browser-new-tab-btn {
-      background: #2a2a2a;
-      border: 1px solid #333;
-      color: #e0e0e0;
-      padding: 8px 12px;
-      cursor: pointer;
-      font-size: 18px;
-      border-radius: 4px;
-      transition: background 0.2s;
-      flex-shrink: 0;
-    }
-
-    .browser-new-tab-btn:hover {
-      background: #333;
-    }
-
-    .browser-window-controls {
-      display: flex;
-      gap: 4px;
-      margin-left: auto;
-      flex-shrink: 0;
-    }
-
-    .browser-new-window-btn,
-    .browser-incognito-btn {
-      background: #333;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: background 0.2s;
-    }
-
-    .browser-new-window-btn:hover {
-      background: #3a3a3a;
-    }
-
-    .browser-incognito-btn:hover {
-      background: #3a3a3a;
-    }
-
-    #browser-tabs-content {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-      position: relative;
-    }
-
-    .browser-tab-content {
-      flex: 1;
-      display: none;
-      position: relative;
-      min-height: 0;
-    }
-
-    .browser-tab-content.active {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .browser-tab-content webview {
-      flex: 1;
-      width: 100%;
-      height: 100%;
-      min-height: 0;
-    }
-
-    .icon-tiny {
-      width: 14px;
-      height: 14px;
-      vertical-align: middle;
-    }
-
-    .chat-edit-btn,
-    .chat-delete-btn {
-      background: none;
-      border: none;
-      color: #999;
-      cursor: pointer;
-      padding: 6px;
-      border-radius: 4px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      transition: color 0.2s, background 0.2s;
-    }
-
-    .chat-edit-btn:hover {
-      color: #FFF;
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    .chat-delete-btn:hover {
-      color: #ff4444;
-      background: rgba(255, 68, 68, 0.1);
-    }
-
-    /* Onboarding Modal */
-    .onboarding-modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.9);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 2000;
-    }
-
-    .onboarding-modal-content {
-      background: #252525;
-      border: 1px solid #444;
-      border-radius: 12px;
-      padding: 32px;
-      max-width: 600px;
-      width: 90%;
-      max-height: 90vh;
-      overflow-y: auto;
-    }
-
-    .onboarding-step {
-      display: none;
-    }
-
-    .onboarding-step.active {
-      display: block;
-      animation: fadeIn 0.3s ease;
-    }
-
-    .onboarding-modal-content h2 {
-      margin-bottom: 16px;
-      color: #fff;
-    }
-
-    .onboarding-modal-content h3 {
-      margin-bottom: 8px;
-      color: #e0e0e0;
-    }
-
-    .onboarding-modal-content p,
-    .onboarding-modal-content li {
-      color: #ccc;
-      line-height: 1.6;
-    }
-
-    .onboarding-actions {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 32px;
-      padding-top: 16px;
-      border-top: 1px solid #444;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(5px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-    /* Code Block Styling */
-    .code-block-wrapper {
-      position: relative;
-      margin: 10px 0;
-      background: #1e1e1e;
-      border-radius: 6px;
-      overflow: hidden;
-      border: 1px solid #333;
-    }
-
-    .code-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 6px 12px;
-      background: #2d2d2d;
-      border-bottom: 1px solid #333;
-      font-size: 12px;
-      color: #999;
-    }
-
-    .code-lang {
-      font-family: monospace;
-      text-transform: uppercase;
-      font-size: 11px;
-    }
-
-    .copy-btn {
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: #fff;
-      font-size: 11px;
-      padding: 4px 8px;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .copy-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-    }
-    
-    .copy-btn.copied {
-      background: #4caf50;
-      border-color: #4caf50;
-    }
-
-    pre {
-      margin: 0;
-      padding: 12px;
-      overflow-x: auto;
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-      font-size: 13px;
-      line-height: 1.5;
-      background: #1e1e1e;
-      color: #d4d4d4;
-    }
-
-    code {
-      font-family: inherit;
-    }
-  </style>
+  <script src="../assets/feather.min.js"></script>
+  <!-- External Stylesheets -->
+  <link rel="stylesheet" href="./styles/base.css">
+  <link rel="stylesheet" href="./styles/chat.css">
+  <link rel="stylesheet" href="./styles/browser.css">
+  <link rel="stylesheet" href="./styles/desktop-apps.css">
+  <link rel="stylesheet" href="./styles/modals.css">
+  <link rel="stylesheet" href="./styles/settings.css">
+  <link rel="stylesheet" href="./styles/logs.css">
 </head>
 
 <body>
@@ -1801,6 +25,9 @@
     <div class="header-controls">
       <button id="browser-button" class="settings-button" title="Open Browser">
         <i data-feather="globe" class="icon icon-small"></i> Browser
+      </button>
+      <button id="desktop-apps-button" class="settings-button" title="Desktop Apps">
+        <i data-feather="monitor" class="icon icon-small"></i> Apps
       </button>
       <button id="chats-button" class="settings-button" title="Chats">
         <i data-feather="message-circle" class="icon icon-small"></i> Chats
@@ -1992,8 +219,12 @@
     </div>
 
     <!-- Chat Container -->
-    <div id="chat-container">
-      <div id="chat-messages"></div>
+    <div id="chat-container" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+      <div id="chat-messages" style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; position: relative;">
+        <button id="scroll-to-bottom-btn" class="scroll-to-bottom-btn" title="Scroll to bottom" style="display: none;">
+          <i data-feather="chevron-down" class="icon"></i>
+        </button>
+      </div>
       <div id="voice-status" class="voice-status">
         <div>
           <i data-feather="mic" class="icon icon-small"></i> Listening...
@@ -2013,11 +244,11 @@
           </span>
         </div>
         <textarea id="message-input" placeholder="Type your message... (Enter to send, Ctrl+Enter for new line)"
-          rows="1"></textarea>
-        <button id="listen-button" class="listen-button" title="Start voice assistant">
+          rows="1" style="flex: 1; background: #1a1a1a; border: 1px solid #444; color: #e0e0e0; font-family: inherit; resize: none; cursor: default; caret-color: transparent;"></textarea>
+        <button id="listen-button" class="listen-button" title="Start voice assistant" style="background: #28a745; color: white; border: none; cursor: default;">
           <i data-feather="mic" class="icon icon-small"></i> Start
         </button>
-        <button id="send-button">Send</button>
+        <button id="send-button" style="background: #0066cc; color: white; border: none; cursor: default; font-weight: 500;">Send</button>
       </div>
     </div>
   </div>
@@ -2081,10 +312,28 @@
       modal.style.opacity = '1';
       modal.style.zIndex = '1001';
 
+      // Ensure inputs are enabled and accessible
       if (nameInput) {
-        setTimeout(() => nameInput.focus(), 100);
+        nameInput.disabled = false;
+        nameInput.readOnly = false;
+        nameInput.style.pointerEvents = 'auto';
+        nameInput.removeAttribute('disabled');
+        nameInput.removeAttribute('readonly');
+        setTimeout(() => {
+          nameInput.focus();
+          nameInput.click(); // Ensure it's clickable
+        }, 100);
       }
-      console.log('Modal shown');
+      
+      if (contextInput) {
+        contextInput.disabled = false;
+        contextInput.readOnly = false;
+        contextInput.style.pointerEvents = 'auto';
+        contextInput.removeAttribute('disabled');
+        contextInput.removeAttribute('readonly');
+      }
+      
+      console.log('Modal shown, inputs enabled');
     };
 
     window.hideNewChatModal = function () {
@@ -2127,11 +376,13 @@
 
       // Cancel Button
       if (cancelBtn) {
-        // Remove existing listeners to be safe (by cloning)
-        const newCancelBtn = cancelBtn.cloneNode(true);
-        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-
-        newCancelBtn.addEventListener('click', (e) => {
+        // Use flag to prevent duplicate listeners
+        if (cancelBtn.dataset.listenerAttached === 'true') {
+          return;
+        }
+        cancelBtn.dataset.listenerAttached = 'true';
+        
+        cancelBtn.addEventListener('click', (e) => {
           console.log('Cancel button clicked');
           e.preventDefault();
           e.stopPropagation();
@@ -2148,25 +399,41 @@
         });
       }
 
-      // Form Submit
+      // Form Submit - use event delegation to avoid cloning issues
       if (form) {
-        // Remove existing listeners
-        const newForm = form.cloneNode(true);
-        form.parentNode.replaceChild(newForm, form);
+        // Use a flag to prevent duplicate listeners
+        if (form.dataset.listenerAttached === 'true') {
+          console.log('Form listener already attached, skipping');
+          return;
+        }
+        form.dataset.listenerAttached = 'true';
 
-        newForm.addEventListener('submit', async (e) => {
+        form.addEventListener('submit', async (e) => {
           console.log('New chat form submitted');
           e.preventDefault();
           e.stopPropagation();
 
-          const nameInput = document.getElementById('new-chat-name');
-          const contextInput = document.getElementById('new-chat-context');
+          // Get inputs directly from the form
+          const nameInput = form.querySelector('#new-chat-name');
+          const contextInput = form.querySelector('#new-chat-context');
+          
+          // Ensure inputs are enabled and accessible
+          if (nameInput) {
+            nameInput.disabled = false;
+            nameInput.readOnly = false;
+            nameInput.style.pointerEvents = 'auto';
+          }
+          if (contextInput) {
+            contextInput.disabled = false;
+            contextInput.readOnly = false;
+            contextInput.style.pointerEvents = 'auto';
+          }
 
           const chatName = nameInput ? nameInput.value.trim() : '';
           const context = contextInput ? contextInput.value.trim() : '';
 
-          const isEditMode = newForm.dataset.mode === 'edit';
-          const editChatId = newForm.dataset.chatId;
+          const isEditMode = form.dataset.mode === 'edit';
+          const editChatId = form.dataset.chatId;
 
           // Determine Chat ID
           const chatId = isEditMode ? editChatId : (chatName || `chat-${Date.now()}`);
@@ -2229,13 +496,7 @@
           }
         });
 
-        // Ensure submit button triggers form submit
-        const realSubmitBtn = document.getElementById('new-chat-submit');
-        if (realSubmitBtn) {
-          const newSubmitBtn = realSubmitBtn.cloneNode(true);
-          realSubmitBtn.parentNode.replaceChild(newSubmitBtn, realSubmitBtn);
-          // No need to add click listener if type="submit", form submit handles it.
-        }
+        // Submit button is already in the form, no need to clone it separately
       }
     }
 
@@ -2246,6 +507,9 @@
       setupModalListeners();
     }
   </script>
+
+  <!-- Load Page Router -->
+  <script src="./renderer/pages/page-router.js"></script>
 
   <!-- Load Main Application Logic -->
   <!-- defer ensures it runs after parsing, just in case -->
@@ -2333,6 +597,185 @@
         updateOnboardingStep();
       } else {
         hideOnboarding();
+      }
+    });
+  </script>
+
+  <!-- Responsive Scaling Script -->
+  <script>
+    /**
+     * Calculate and apply responsive scale factor based on window size
+     * Scales down UI components when window is small
+     */
+    function updateScaleFactor() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      
+      // Base reference size (800x600 is the default window size)
+      const baseWidth = 800;
+      const baseHeight = 600;
+      
+      // Calculate scale based on the smaller dimension (width or height)
+      // Use the smaller value to ensure everything fits
+      const widthScale = width / baseWidth;
+      const heightScale = height / baseHeight;
+      const scale = Math.min(widthScale, heightScale, 1); // Don't scale up beyond 1
+      
+      // Minimum scale to prevent UI from becoming too small
+      const minScale = 0.5;
+      const maxScale = 1.0;
+      const finalScale = Math.max(minScale, Math.min(maxScale, scale));
+      
+      // Apply scale factor to CSS variable
+      document.documentElement.style.setProperty('--scale-factor', finalScale);
+      
+      console.log(`Window size: ${width}x${height}, Scale factor: ${finalScale.toFixed(2)}`);
+    }
+    
+    // Update scale on window resize
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(updateScaleFactor, 100); // Debounce for performance
+    });
+    
+    // Initial scale calculation
+    updateScaleFactor();
+    
+    // Also listen for window resize events from Electron (when resized via keyboard shortcuts)
+    if (window.electronAPI && window.electronAPI.onWindowResize) {
+      window.electronAPI.onWindowResize((data) => {
+        // Small delay to ensure window size is updated
+        setTimeout(updateScaleFactor, 50);
+      });
+    }
+  </script>
+
+  <!-- Screen Sharing Detection - Hide sensitive UI during meetings -->
+  <script>
+    /**
+     * Detect screen sharing and hide sensitive UI elements
+     * Prevents API keys, dropdowns, and settings from showing in meetings
+     */
+    let isScreenSharing = false;
+    let screenShareCheckInterval = null;
+
+    function detectScreenSharing() {
+      // Check if getDisplayMedia is being used (screen sharing active)
+      // Monitor for active MediaStream tracks that indicate screen sharing
+      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+        // Check if there are any display media streams active
+        navigator.mediaDevices.enumerateDevices().then(devices => {
+          const hasDisplayMedia = devices.some(device => 
+            device.kind === 'videoinput' && device.label.includes('screen') ||
+            device.label.includes('window') ||
+            device.label.includes('Desktop')
+          );
+          
+          // Also check for active MediaStream tracks
+          navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+              const videoTracks = stream.getVideoTracks();
+              const isDisplayMedia = videoTracks.some(track => 
+                track.label.includes('screen') ||
+                track.label.includes('window') ||
+                track.label.includes('Desktop') ||
+                track.getSettings().displaySurface
+              );
+              
+              // Stop the test stream
+              stream.getTracks().forEach(track => track.stop());
+              
+              if (isDisplayMedia || hasDisplayMedia) {
+                enableScreenSharingMode();
+              } else {
+                disableScreenSharingMode();
+              }
+            })
+            .catch(() => {
+              // If we can't check, assume not sharing for safety
+              disableScreenSharingMode();
+            });
+        }).catch(() => {
+          disableScreenSharingMode();
+        });
+      }
+    }
+
+    function enableScreenSharingMode() {
+      if (!isScreenSharing) {
+        isScreenSharing = true;
+        document.body.classList.add('screen-sharing');
+        console.log('Screen sharing detected - hiding sensitive UI elements');
+        
+        // Also hide any open settings panels
+        const settingsPanel = document.getElementById('settings-panel');
+        if (settingsPanel) {
+          settingsPanel.style.display = 'none';
+        }
+        
+        // Close any dropdowns
+        const providerSelector = document.getElementById('provider-selector');
+        if (providerSelector) {
+          providerSelector.blur();
+        }
+      }
+    }
+
+    function disableScreenSharingMode() {
+      if (isScreenSharing) {
+        isScreenSharing = false;
+        document.body.classList.remove('screen-sharing');
+        console.log('Screen sharing ended - showing UI elements');
+      }
+    }
+
+    // Monitor for screen sharing periodically
+    function startScreenShareMonitoring() {
+      // Check every 2 seconds
+      screenShareCheckInterval = setInterval(() => {
+        detectScreenSharing();
+      }, 2000);
+      
+      // Initial check
+      detectScreenSharing();
+    }
+
+    // Override getDisplayMedia to detect when screen sharing starts
+    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+      const originalGetDisplayMedia = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
+      
+      navigator.mediaDevices.getDisplayMedia = function(constraints) {
+        console.log('getDisplayMedia called - enabling screen sharing protection');
+        enableScreenSharingMode();
+        
+        return originalGetDisplayMedia(constraints).then(stream => {
+          // Monitor when stream ends
+          stream.getVideoTracks().forEach(track => {
+            track.addEventListener('ended', () => {
+              console.log('Screen sharing track ended');
+              setTimeout(() => {
+                detectScreenSharing();
+              }, 1000);
+            });
+          });
+          
+          return stream;
+        });
+      };
+    }
+
+    // Start monitoring when page loads
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startScreenShareMonitoring);
+    } else {
+      startScreenShareMonitoring();
+    }
+
+    // Also check on visibility change (user switches windows/apps)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        detectScreenSharing();
       }
     });
   </script>

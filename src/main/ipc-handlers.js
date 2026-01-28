@@ -17,6 +17,8 @@ const { writeAuditLog } = require('../security/audit-log');
 const securityMonitor = require('./security-monitor');
 const fs = require('fs').promises;
 const path = require('path');
+const windowManagerService = require('./window-manager-service');
+const appDiscoveryService = require('./app-discovery-service');
 
 // Rate limiting for sensitive operations
 const rateLimit = {
@@ -383,8 +385,54 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       const OpenAICompatibleProvider = require('../providers/openai-compatible');
       const GroqProvider = require('../providers/groq');
 
+      // Fix: If account is configured as "openai-compatible" but uses OpenAI's API URL,
+      // or has no baseURL but has an API key (likely OpenAI), automatically use the OpenAI provider instead
+      let providerType = providerConfig.type || '';
+      const baseURL = (providerConfig.baseURL || '').trim();
+      const apiKey = (providerConfig.apiKey || '').trim();
+      const model = (providerConfig.model || '').toLowerCase();
+      
+      // Always log for debugging
+      securityMonitor.logInfo(`[Provider Check] type="${providerType}", name="${providerConfig.name || 'unknown'}", baseURL="${baseURL || 'none'}", hasApiKey=${!!apiKey && apiKey.length > 0}, model="${model || 'none'}"`);
+      
+      if (providerType === 'openai-compatible') {
+        // PRIORITY 1: Check model name first (most reliable indicator)
+        // Check if model contains "gpt" (covers gpt-3.5-turbo, gpt-4, etc.)
+        const isOpenAIModel = model && model.includes('gpt');
+        
+        if (isOpenAIModel) {
+          providerType = 'openai';
+          securityMonitor.logInfo(`✓ Auto-correcting: openai-compatible -> openai (detected OpenAI model: ${providerConfig.model || model})`);
+        }
+        
+        // PRIORITY 2: Check if baseURL points to OpenAI API
+        if (providerType === 'openai-compatible' && baseURL) {
+          const baseURLLower = baseURL.toLowerCase();
+          if (baseURLLower.includes('api.openai.com')) {
+            providerType = 'openai';
+            securityMonitor.logInfo(`✓ Auto-correcting: openai-compatible -> openai (detected OpenAI API URL: ${baseURL})`);
+          }
+        }
+        
+        // PRIORITY 3: Check for API key (openai-compatible typically doesn't need keys)
+        if (providerType === 'openai-compatible' && apiKey && apiKey.length > 0) {
+          providerType = 'openai';
+          securityMonitor.logInfo(`✓ Auto-correcting: openai-compatible -> openai (has API key but no baseURL)`);
+        }
+        
+        // Final check - if still openai-compatible with default localhost, warn
+        if (providerType === 'openai-compatible' && (!baseURL || baseURL === 'http://localhost:8080')) {
+          securityMonitor.logInfo(`⚠ Warning: openai-compatible provider "${providerConfig.name}" will use default localhost:8080`);
+        }
+      }
+      
+      // Log final provider type
+      if (providerConfig.type === 'openai-compatible' && providerType !== providerConfig.type) {
+        securityMonitor.logInfo(`[Provider Correction] Changed from "${providerConfig.type}" to "${providerType}"`);
+      }
+
       let provider;
-      switch (providerConfig.type) {
+      switch (providerType) {
         case 'openai':
           provider = new OpenAIProvider(providerConfig);
           break;
@@ -509,16 +557,104 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
         return { success: false, error: 'Not authenticated' };
       }
 
+      // DEBUG: Log full providerConfig received
+      securityMonitor.logInfo(`[DEBUG] Received providerConfig:`, {
+        name: providerConfig.name,
+        type: providerConfig.type,
+        model: providerConfig.model,
+        hasApiKey: !!providerConfig.apiKey,
+        apiKeyLength: providerConfig.apiKey ? providerConfig.apiKey.length : 0,
+        apiKeyPreview: providerConfig.apiKey ? providerConfig.apiKey.substring(0, 10) + '...' : 'none',
+        hasBaseURL: !!providerConfig.baseURL,
+        baseURL: providerConfig.baseURL || 'none'
+      });
+
       // Load provider modules
       const OpenAIProvider = require('../providers/openai');
       const OllamaProvider = require('../providers/ollama');
       const OpenAICompatibleProvider = require('../providers/openai-compatible');
       const GroqProvider = require('../providers/groq');
 
+      // Fix: If account is configured as "openai-compatible" but uses OpenAI's API URL,
+      // or has no baseURL but has an API key (likely OpenAI), automatically use the OpenAI provider instead
+      let providerType = providerConfig.type || '';
+      const baseURL = (providerConfig.baseURL || '').trim();
+      const apiKey = (providerConfig.apiKey || '').trim();
+      const model = (providerConfig.model || '').toLowerCase();
+      
+      // Always log for debugging
+      securityMonitor.logInfo(`[Provider Check] type="${providerType}", name="${providerConfig.name || 'unknown'}", baseURL="${baseURL || 'none'}", hasApiKey=${!!apiKey && apiKey.length > 0}, apiKeyLength=${apiKey.length}, model="${model || 'none'}"`);
+      
+      if (providerType === 'openai-compatible') {
+        // PRIORITY 1: Check model name first (most reliable indicator)
+        // Check if model contains "gpt" (covers gpt-3.5-turbo, gpt-4, etc.)
+        const isOpenAIModel = model && model.includes('gpt');
+        
+        if (isOpenAIModel) {
+          providerType = 'openai';
+          securityMonitor.logInfo(`✓ Auto-correcting: openai-compatible -> openai (detected OpenAI model: ${providerConfig.model || model})`);
+        }
+        
+        // PRIORITY 2: Check if baseURL points to OpenAI API
+        if (providerType === 'openai-compatible' && baseURL) {
+          const baseURLLower = baseURL.toLowerCase();
+          if (baseURLLower.includes('api.openai.com')) {
+            providerType = 'openai';
+            securityMonitor.logInfo(`✓ Auto-correcting: openai-compatible -> openai (detected OpenAI API URL: ${baseURL})`);
+          }
+        }
+        
+        // PRIORITY 3: Check for API key (openai-compatible typically doesn't need keys)
+        if (providerType === 'openai-compatible' && apiKey && apiKey.length > 0) {
+          providerType = 'openai';
+          securityMonitor.logInfo(`✓ Auto-correcting: openai-compatible -> openai (has API key but no baseURL)`);
+        }
+        
+        // Final check - if still openai-compatible with default localhost, warn
+        if (providerType === 'openai-compatible' && (!baseURL || baseURL === 'http://localhost:8080')) {
+          securityMonitor.logInfo(`⚠ Warning: openai-compatible provider "${providerConfig.name}" will use default localhost:8080`);
+        }
+      }
+      
+      // Log final provider type
+      if (providerConfig.type === 'openai-compatible' && providerType !== providerConfig.type) {
+        securityMonitor.logInfo(`[Provider Correction] Changed from "${providerConfig.type}" to "${providerType}"`);
+      }
+
+      // Validate API key before creating provider
+      if (providerType === 'openai') {
+        const apiKey = (providerConfig.apiKey || '').trim();
+        securityMonitor.logInfo(`[DEBUG] Validating OpenAI API key:`, {
+          accountName: providerConfig.name,
+          hasApiKey: !!apiKey,
+          apiKeyLength: apiKey.length,
+          apiKeyPreview: apiKey ? apiKey.substring(0, 10) + '...' + apiKey.slice(-4) : 'none',
+          apiKeyStartsWith: apiKey ? apiKey.substring(0, 7) : 'none'
+        });
+        
+        if (!apiKey) {
+          securityMonitor.logError(`[Error] OpenAI provider missing API key for account "${providerConfig.name}"`);
+          return { 
+            success: false, 
+            error: 'OpenAI API key is required. Please add your API key in Settings → AI Accounts.' 
+          };
+        }
+        securityMonitor.logInfo(`[Provider] OpenAI account "${providerConfig.name}" has API key (length: ${apiKey.length})`);
+      }
+
+      // DEBUG: Log before creating provider
+      securityMonitor.logInfo(`[DEBUG] Creating provider:`, {
+        type: providerType,
+        name: providerConfig.name,
+        model: providerConfig.model,
+        apiKeyLength: providerConfig.apiKey ? providerConfig.apiKey.length : 0
+      });
+
       let provider;
-      switch (providerConfig.type) {
+      switch (providerType) {
         case 'openai':
           provider = new OpenAIProvider(providerConfig);
+          securityMonitor.logInfo(`[DEBUG] OpenAIProvider created with apiKey length: ${provider.apiKey ? provider.apiKey.length : 0}`);
           break;
         case 'ollama':
           provider = new OllamaProvider(providerConfig);
@@ -961,7 +1097,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       color: #e0e0e0;
       padding: 6px 12px;
       border-radius: 4px;
-      cursor: pointer;
+      cursor: default;
       font-size: 14px;
       min-width: 32px;
     }
@@ -987,7 +1123,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       color: #e0e0e0;
       padding: 6px 12px;
       border-radius: 4px;
-      cursor: pointer;
+      cursor: default;
       font-size: 14px;
       min-width: 32px;
     }
@@ -1025,7 +1161,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       border-right: 1px solid #333;
       min-width: 120px;
       max-width: 200px;
-      cursor: pointer;
+      cursor: default;
       user-select: none;
       font-size: 13px;
     }
@@ -1067,7 +1203,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       background: transparent;
       border: none;
       color: #999;
-      cursor: pointer;
+      cursor: default;
     }
     .new-tab-btn:hover {
       background: #333;
@@ -1333,6 +1469,77 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       });
 
       return { success: true, windowId: browserWindow.id };
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get installed applications
+  ipcMain.handle('get-installed-apps', async () => {
+    try {
+      const apps = await appDiscoveryService.getCachedApps();
+      return { success: true, apps };
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message, apps: [] };
+    }
+  });
+
+  // Launch application and embed
+  ipcMain.handle('launch-app', async (event, appPath, tabId) => {
+    try {
+      const result = await windowManagerService.launchAndEmbed(appPath, tabId);
+      return result;
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Switch tab (show/hide embedded windows)
+  ipcMain.handle('switch-tab', async (event, fromTabId, toTabId) => {
+    try {
+      if (fromTabId) {
+        windowManagerService.hideTab(fromTabId);
+      }
+      if (toTabId) {
+        windowManagerService.showTab(toTabId);
+      }
+      return { success: true };
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Close tab
+  ipcMain.handle('close-tab', async (event, tabId) => {
+    try {
+      const result = windowManagerService.closeTab(tabId);
+      return result;
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Resize embedded window
+  ipcMain.handle('resize-embedded-window', async (event, tabId, width, height) => {
+    try {
+      const result = windowManagerService.resizeWindow(tabId, width, height);
+      return result;
+    } catch (error) {
+      securityMonitor.logError(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Move embedded window
+  ipcMain.handle('move-embedded-window', async (event, tabId, x, y) => {
+    try {
+      const result = windowManagerService.moveWindow(tabId, x, y);
+      return result;
     } catch (error) {
       securityMonitor.logError(error);
       return { success: false, error: error.message };

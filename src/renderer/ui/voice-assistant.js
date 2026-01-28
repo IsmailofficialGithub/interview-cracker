@@ -49,6 +49,20 @@ class VoiceAssistant {
     this.isToggling = false;
     this.lastErrorTime = 0;
     this.lastErrorMessage = '';
+
+    // Voice Activity Detection (VAD)
+    this.audioContext = null;
+    this.analyserNode = null;
+    this.voiceActivityCheckInterval = null;
+    this.isSpeaking = false;
+    this.silenceStartTime = null;
+    this.silenceDurationThreshold = 1500; // 1.5 seconds of silence before processing
+    this.speechThreshold = -40; // dB threshold for speech detection
+    this.silenceThreshold = -50; // dB threshold for silence detection
+    this.minRecordingDuration = 500; // Minimum 0.5 seconds of recording
+    this.maxRecordingDuration = 30000; // Maximum 30 seconds of recording
+    this.recordingStartTime = null;
+    this.accumulatedChunks = []; // Store chunks while speaking
   }
 
   /**
@@ -70,21 +84,53 @@ class VoiceAssistant {
       if (result.success && result.data) {
         this.config = result.data;
 
-        // Find Groq provider first, then OpenAI
+        // Get voice API setting from settings (user's preference)
+        const settings = this.config.settings || {};
+        const voiceAPI = settings.voiceAPI || 'groq-whisper'; // Default to Groq Whisper
+        
+        console.log('[VoiceAssistant] Voice API setting:', voiceAPI);
+
+        // Find accounts
         const accounts = this.config.accounts || [];
         const groqAccount = accounts.find(a => a.type === 'groq');
         const openaiAccount = accounts.find(a => a.type === 'openai');
 
+        // Set whisper provider based on user's voiceAPI setting, not which account exists first
+        if (voiceAPI === 'openai-whisper' || voiceAPI === 'openai') {
+          // User wants OpenAI Whisper
+          if (openaiAccount) {
+            this.whisperProvider = 'openai';
+            this.whisperApiKey = openaiAccount.apiKey;
+            this.whisperModel = 'whisper-1';
+            console.log('[VoiceAssistant] Using OpenAI Whisper for transcription');
+          } else {
+            console.warn('[VoiceAssistant] OpenAI Whisper selected but no OpenAI account found, falling back to Groq');
+            if (groqAccount) {
+              this.whisperProvider = 'groq';
+              this.whisperApiKey = groqAccount.apiKey;
+              this.whisperModel = 'whisper-large-v3-turbo';
+            }
+          }
+        } else {
+          // Default to Groq Whisper (groq-whisper or any other value)
+          if (groqAccount) {
+            this.whisperProvider = 'groq';
+            this.whisperApiKey = groqAccount.apiKey;
+            this.whisperModel = 'whisper-large-v3-turbo';
+            console.log('[VoiceAssistant] Using Groq Whisper for transcription');
+          } else if (openaiAccount) {
+            console.warn('[VoiceAssistant] Groq Whisper selected but no Groq account found, falling back to OpenAI');
+            this.whisperProvider = 'openai';
+            this.whisperApiKey = openaiAccount.apiKey;
+            this.whisperModel = 'whisper-1';
+          }
+        }
+
+        // Set currentProvider for LLM (this is now handled by chat selection, but keep for fallback)
         if (groqAccount) {
           this.currentProvider = 'groq';
-          this.whisperProvider = 'groq';
-          this.whisperApiKey = groqAccount.apiKey;
-          this.whisperModel = 'whisper-large-v3-turbo';
         } else if (openaiAccount) {
           this.currentProvider = 'openai';
-          this.whisperProvider = 'openai';
-          this.whisperApiKey = openaiAccount.apiKey;
-          this.whisperModel = 'whisper-1';
         }
       }
     } catch (error) {
@@ -246,7 +292,7 @@ class VoiceAssistant {
         });
 
         // Make sure it's clickable
-        newOption.style.cursor = 'pointer';
+        newOption.style.cursor = 'default';
         newOption.style.pointerEvents = 'auto';
       });
 
@@ -506,6 +552,12 @@ class VoiceAssistant {
     this.isActive = false;
     this.isProcessing = false;
 
+    // Stop VAD checking
+    if (this.voiceActivityCheckInterval) {
+      clearInterval(this.voiceActivityCheckInterval);
+      this.voiceActivityCheckInterval = null;
+    }
+
     // Stop recording
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
@@ -522,6 +574,17 @@ class VoiceAssistant {
       this.transcriptionInterval = null;
     }
 
+    // Close AudioContext
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      try {
+        await this.audioContext.close();
+      } catch (error) {
+        console.warn('Error closing AudioContext:', error);
+      }
+      this.audioContext = null;
+      this.analyserNode = null;
+    }
+
     // Stop audio stream
     if (this.audioStream) {
       this.audioStream.getTracks().forEach(track => track.stop());
@@ -530,7 +593,11 @@ class VoiceAssistant {
 
     this.mediaRecorder = null;
     this.audioChunks = [];
+    this.accumulatedChunks = [];
     this.lastProcessedChunkIndex = 0;
+    this.isSpeaking = false;
+    this.silenceStartTime = null;
+    this.recordingStartTime = null;
     this.updateUI();
   }
 
@@ -569,6 +636,21 @@ class VoiceAssistant {
 
       // Initialize chunk storage for the cycle
       this.currentCycleChunks = [];
+      this.accumulatedChunks = [];
+
+      // Create AudioContext for Voice Activity Detection
+      try {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = this.audioContext.createMediaStreamSource(this.audioStream);
+        this.analyserNode = this.audioContext.createAnalyser();
+        this.analyserNode.fftSize = 256;
+        this.analyserNode.smoothingTimeConstant = 0.8;
+        source.connect(this.analyserNode);
+        console.log('AudioContext created for VAD in MINE mode');
+      } catch (error) {
+        console.error('Failed to create AudioContext for VAD:', error);
+        // Continue without VAD if AudioContext fails
+      }
 
       // Create MediaRecorder
       this.mediaRecorder = new MediaRecorder(this.audioStream, {
@@ -579,6 +661,7 @@ class VoiceAssistant {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.currentCycleChunks.push(event.data);
+          this.accumulatedChunks.push(event.data);
         }
       };
 
@@ -586,17 +669,30 @@ class VoiceAssistant {
       this.mediaRecorder.onstop = async () => {
         if (this.currentCycleChunks.length > 0) {
           const blob = new Blob(this.currentCycleChunks, { type: 'audio/webm' });
-          this.currentCycleChunks = []; // Reset for next cycle (though we create new recorder usually)
+          this.currentCycleChunks = []; // Reset for next cycle
           await this.processAudioBlob(blob);
         }
 
-        // Restart if still active
+        // Restart if still active (VAD will detect next speech)
         if (this.isActive) {
-          this.startRecordingCycle();
+          // Small delay before restarting to avoid immediate re-trigger
+          setTimeout(() => {
+            if (this.isActive) {
+              this.startRecordingCycle();
+            }
+          }, 200);
         }
       };
 
-      // Start the first cycle
+      // Start VAD checking interval
+      if (this.analyserNode) {
+        this.voiceActivityCheckInterval = setInterval(() => {
+          this.checkVoiceActivity();
+        }, 100); // Check every 100ms
+        console.log('VAD checking started for MINE mode');
+      }
+
+      // Start the first recording cycle
       this.startRecordingCycle();
 
     } catch (error) {
@@ -605,19 +701,112 @@ class VoiceAssistant {
     }
   }
 
-  // Helper to manage the recording cycle
-  startRecordingCycle() {
-    if (!this.isActive || !this.mediaRecorder || this.mediaRecorder.state !== 'inactive') return;
+  /**
+   * Check voice activity using audio analysis
+   */
+  checkVoiceActivity() {
+    if (!this.analyserNode || !this.isActive) return;
 
-    this.currentCycleChunks = [];
-    this.mediaRecorder.start();
+    try {
+      const dataArray = new Uint8Array(this.analyserNode.frequencyBinCount);
+      this.analyserNode.getByteFrequencyData(dataArray);
 
-    // Record for 2 seconds then stop -> creates a valid file
-    setTimeout(() => {
-      if (this.isActive && this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-        this.mediaRecorder.stop();
+      // Calculate average volume
+      const sum = dataArray.reduce((a, b) => a + b, 0);
+      const average = sum / dataArray.length;
+      
+      // Convert to dB (0-255 range, normalize and convert to dB)
+      // Avoid log(0) by adding small value
+      const normalized = average / 255;
+      const volume = normalized > 0 ? 20 * Math.log10(normalized) : -100;
+
+      const now = Date.now();
+      const recordingDuration = this.recordingStartTime ? now - this.recordingStartTime : 0;
+
+      // Check for maximum recording duration
+      if (recordingDuration >= this.maxRecordingDuration && this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+        console.log('Maximum recording duration reached, processing audio');
+        this.stopRecordingAndProcess();
+        return;
       }
-    }, 2000);
+
+      // Check for minimum recording duration before allowing silence detection
+      const canDetectSilence = recordingDuration >= this.minRecordingDuration;
+
+      if (volume > this.speechThreshold) {
+        // Speech detected
+        if (!this.isSpeaking && canDetectSilence) {
+          console.log('Speech detected, volume:', volume.toFixed(2), 'dB');
+        }
+        this.isSpeaking = true;
+        this.silenceStartTime = null;
+      } else if (volume < this.silenceThreshold) {
+        // Silence detected
+        if (this.isSpeaking && canDetectSilence) {
+          if (!this.silenceStartTime) {
+            this.silenceStartTime = now;
+            console.log('Silence detected, starting silence timer');
+          } else {
+            const silenceDuration = now - this.silenceStartTime;
+            if (silenceDuration >= this.silenceDurationThreshold) {
+              // User stopped speaking - process audio
+              console.log('Silence duration threshold reached, processing audio');
+              this.isSpeaking = false;
+              this.stopRecordingAndProcess();
+              this.silenceStartTime = null;
+            }
+          }
+        } else if (!this.isSpeaking && !this.silenceStartTime) {
+          // Not speaking yet, waiting for speech
+          this.silenceStartTime = null;
+        }
+      }
+    } catch (error) {
+      console.error('Error in voice activity detection:', error);
+    }
+  }
+
+  /**
+   * Stop recording and process accumulated audio
+   */
+  async stopRecordingAndProcess() {
+    if (!this.mediaRecorder || this.mediaRecorder.state !== 'recording') {
+      return;
+    }
+
+    try {
+      // Stop the recorder
+      this.mediaRecorder.stop();
+      
+      // The onstop handler will process the audio
+      // Reset state for next recording
+      this.isSpeaking = false;
+      this.silenceStartTime = null;
+      this.recordingStartTime = null;
+    } catch (error) {
+      console.error('Error stopping recording:', error);
+    }
+  }
+
+  // Helper to manage the recording cycle (now VAD-based)
+  startRecordingCycle() {
+    if (!this.isActive || !this.mediaRecorder) return;
+
+    // If already recording, don't restart
+    if (this.mediaRecorder.state === 'recording') {
+      return;
+    }
+
+    // Reset state
+    this.currentCycleChunks = [];
+    this.accumulatedChunks = [];
+    this.isSpeaking = false;
+    this.silenceStartTime = null;
+    this.recordingStartTime = Date.now();
+
+    // Start recording
+    this.mediaRecorder.start();
+    console.log('Started new recording cycle (VAD-based)');
   }
 
   /**
@@ -693,11 +882,23 @@ class VoiceAssistant {
       // (Simplified: just use the first audio track, assuming system audio)
       this.audioStream = new MediaStream([audioTracks[0]]);
 
-
-
-
       // Initialize chunk storage
       this.currentCycleChunks = [];
+      this.accumulatedChunks = [];
+
+      // Create AudioContext for Voice Activity Detection
+      try {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = this.audioContext.createMediaStreamSource(this.audioStream);
+        this.analyserNode = this.audioContext.createAnalyser();
+        this.analyserNode.fftSize = 256;
+        this.analyserNode.smoothingTimeConstant = 0.8;
+        source.connect(this.analyserNode);
+        console.log('AudioContext created for VAD in YOURS mode');
+      } catch (error) {
+        console.error('Failed to create AudioContext for VAD:', error);
+        // Continue without VAD if AudioContext fails
+      }
 
       // Create MediaRecorder
       this.mediaRecorder = new MediaRecorder(this.audioStream, {
@@ -708,6 +909,7 @@ class VoiceAssistant {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.currentCycleChunks.push(event.data);
+          this.accumulatedChunks.push(event.data);
         }
       };
 
@@ -719,12 +921,26 @@ class VoiceAssistant {
           await this.processAudioBlob(blob);
         }
 
+        // Restart if still active (VAD will detect next speech)
         if (this.isActive) {
-          this.startRecordingCycle();
+          // Small delay before restarting to avoid immediate re-trigger
+          setTimeout(() => {
+            if (this.isActive) {
+              this.startRecordingCycle();
+            }
+          }, 200);
         }
       };
 
-      // Start first cycle
+      // Start VAD checking interval
+      if (this.analyserNode) {
+        this.voiceActivityCheckInterval = setInterval(() => {
+          this.checkVoiceActivity();
+        }, 100); // Check every 100ms
+        console.log('VAD checking started for YOURS mode');
+      }
+
+      // Start first recording cycle
       this.startRecordingCycle();
 
     } catch (error) {
@@ -748,11 +964,15 @@ class VoiceAssistant {
     this.updateStatus();
 
     try {
+      // Reload config to ensure we have the latest voice API setting
+      await this.loadConfig();
+      
       // Convert to ArrayBuffer for IPC
       const arrayBuffer = await audioBlob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
 
       console.log(`Processing audio blob: ${audioBlob.size} bytes`);
+      console.log(`[VoiceAssistant] Using whisper provider: ${this.whisperProvider}, model: ${this.whisperModel}`);
 
       // Transcribe using Whisper API
       const transcriptionResult = await window.electronAPI.transcribeAudio(
@@ -933,36 +1153,98 @@ class VoiceAssistant {
         chatContext = this.chatUI.context;
       }
 
-      // Get provider config
+      // Get provider config - use the chat's selected provider, not voice assistant's internal provider
       const accounts = this.config?.accounts || [];
       let providerConfig = null;
 
-      if (this.currentProvider === 'groq') {
-        const groqAccount = accounts.find(a => a.type === 'groq');
-        if (groqAccount) {
+      // Use the chat's selected provider (from dropdown) instead of voice assistant's internal provider
+      const selectedProviderId = window.currentProviderId || null;
+      console.log('[VoiceAssistant] Using chat selected provider:', selectedProviderId, 'instead of voice assistant provider:', this.currentProvider);
+
+      if (selectedProviderId) {
+        // Find the account by name (the selected provider ID is the account name)
+        const selectedAccount = accounts.find(acc => acc.name === selectedProviderId);
+        if (selectedAccount) {
+          console.log('[VoiceAssistant] Found selected account:', {
+            name: selectedAccount.name,
+            type: selectedAccount.type,
+            model: selectedAccount.model
+          });
+
           // SAFEGUARD: Ensure we don't use Whisper model for Chat
-          let model = groqAccount.model || 'llama-3.1-8b-instant';
+          let model = selectedAccount.model || (selectedAccount.type === 'groq' ? 'llama-3.1-8b-instant' : 'gpt-3.5-turbo');
           if (model.includes('whisper')) {
-            console.warn('Whisper model selected for chat - falling back to llama-3.1-8b-instant');
-            model = 'llama-3.1-8b-instant';
+            console.warn('[VoiceAssistant] Whisper model selected for chat - falling back to default');
+            model = selectedAccount.type === 'groq' ? 'llama-3.1-8b-instant' : 'gpt-3.5-turbo';
           }
 
           providerConfig = {
-            type: 'groq',
-            apiKey: groqAccount.apiKey,
+            name: selectedAccount.name,
+            type: selectedAccount.type,
+            apiKey: selectedAccount.apiKey,
             model: model,
-            baseURL: groqAccount.baseURL
+            baseURL: selectedAccount.baseURL
           };
+        } else {
+          console.warn('[VoiceAssistant] Selected provider not found in accounts, falling back to old logic');
+          // Fallback to old logic if selected provider not found
+          if (this.currentProvider === 'groq') {
+            const groqAccount = accounts.find(a => a.type === 'groq');
+            if (groqAccount) {
+              let model = groqAccount.model || 'llama-3.1-8b-instant';
+              if (model.includes('whisper')) {
+                model = 'llama-3.1-8b-instant';
+              }
+              providerConfig = {
+                name: groqAccount.name,
+                type: 'groq',
+                apiKey: groqAccount.apiKey,
+                model: model,
+                baseURL: groqAccount.baseURL
+              };
+            }
+          } else {
+            const openaiAccount = accounts.find(a => a.type === 'openai');
+            if (openaiAccount) {
+              providerConfig = {
+                name: openaiAccount.name,
+                type: 'openai',
+                apiKey: openaiAccount.apiKey,
+                model: openaiAccount.model || 'gpt-3.5-turbo',
+                baseURL: openaiAccount.baseURL
+              };
+            }
+          }
         }
       } else {
-        const openaiAccount = accounts.find(a => a.type === 'openai');
-        if (openaiAccount) {
-          providerConfig = {
-            type: 'openai',
-            apiKey: openaiAccount.apiKey,
-            model: openaiAccount.model || 'gpt-3.5-turbo',
-            baseURL: openaiAccount.baseURL
-          };
+        // No provider selected in chat, use old logic as fallback
+        console.warn('[VoiceAssistant] No chat provider selected, using voice assistant provider:', this.currentProvider);
+        if (this.currentProvider === 'groq') {
+          const groqAccount = accounts.find(a => a.type === 'groq');
+          if (groqAccount) {
+            let model = groqAccount.model || 'llama-3.1-8b-instant';
+            if (model.includes('whisper')) {
+              model = 'llama-3.1-8b-instant';
+            }
+            providerConfig = {
+              name: groqAccount.name,
+              type: 'groq',
+              apiKey: groqAccount.apiKey,
+              model: model,
+              baseURL: groqAccount.baseURL
+            };
+          }
+        } else {
+          const openaiAccount = accounts.find(a => a.type === 'openai');
+          if (openaiAccount) {
+            providerConfig = {
+              name: openaiAccount.name,
+              type: 'openai',
+              apiKey: openaiAccount.apiKey,
+              model: openaiAccount.model || 'gpt-3.5-turbo',
+              baseURL: openaiAccount.baseURL
+            };
+          }
         }
       }
 

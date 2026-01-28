@@ -3,13 +3,15 @@
  * Application entry point and window management
  */
 
-const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen } = require('electron');
 const path = require('path');
 const windowManager = require('./window-manager');
 const systemTray = require('./system-tray');
 const ipcHandlers = require('./ipc-handlers');
 const securityMonitor = require('./security-monitor');
 const ghostTyper = require('./ghost-typer');
+const windowManagerService = require('./window-manager-service');
+const appDiscoveryService = require('./app-discovery-service');
 
 // Security: Disable remote module
 app.allowRendererProcessReuse = true;
@@ -34,6 +36,7 @@ function createWindow() {
     height: 600,
     minWidth: 600,
     minHeight: 400,
+    resizable: false, // Prevent drag resizing and cursor changes
     backgroundColor: '#1a1a1a', // Dark background
     alwaysOnTop: true, // Always stay on top of all windows
     webPreferences: {
@@ -46,8 +49,7 @@ function createWindow() {
       webviewTag: true, // Enable webview tag for in-built browser
     },
     show: false, // Don't show until ready
-    frame: false, // Frameless window
-    titleBarStyle: 'hidden', // Hide title bar
+    frame: false, // No window frame (no title bar)
     skipTaskbar: true, // Hide from taskbar
     icon: path.join(__dirname, '../../assets/icon.png') // Will be set if exists
   });
@@ -82,15 +84,8 @@ function createWindow() {
       mainWindow.show();
       // Ensure always-on-top is enabled
       mainWindow.setAlwaysOnTop(true);
-      mainWindow.focus();
-    }
-  });
-  // Show window when ready
-  mainWindow.once('ready-to-show', () => {
-    if (mainWindow) {
-      mainWindow.show();
-      // Ensure always-on-top is enabled
-      mainWindow.setAlwaysOnTop(true);
+      // Ensure window is not resizable (prevent drag resizing)
+      mainWindow.setResizable(false);
       mainWindow.focus();
 
       // Open DevTools in development (F12 or Ctrl+Shift+I)
@@ -168,6 +163,27 @@ function createWindow() {
 
   // Initialize window manager
   windowManager.initialize(mainWindow);
+
+  // Initialize desktop app embedding services (Windows only)
+  if (process.platform === 'win32') {
+    try {
+      windowManagerService.initialize(mainWindow);
+      appDiscoveryService.initialize();
+      
+      // Hook window resize events
+      mainWindow.on('resize', () => {
+        const bounds = mainWindow.getBounds();
+        windowManagerService.resizeAllWindows(bounds.width, bounds.height);
+      });
+      
+      // Monitor processes periodically
+      setInterval(() => {
+        windowManagerService.monitorProcesses();
+      }, 5000); // Check every 5 seconds
+    } catch (error) {
+      console.error('Failed to initialize desktop app embedding services:', error);
+    }
+  }
 
   // Register IPC handlers
   ipcHandlers.registerHandlers(mainWindow, () => sessionKey, (key) => {
@@ -300,6 +316,15 @@ if (!gotTheLock) {
 app.on('before-quit', () => {
   sessionKey = null;
   securityMonitor.shutdown();
+  
+  // Cleanup embedded windows
+  if (process.platform === 'win32') {
+    try {
+      windowManagerService.cleanupAll();
+    } catch (error) {
+      console.error('Error cleaning up embedded windows:', error);
+    }
+  }
 });
 
 // Handle uncaught errors
@@ -332,6 +357,84 @@ process.on('unhandledRejection', (reason, promise) => {
     });
   }
 });
+
+/**
+ * Resize window by a fixed amount
+ * @param {number} deltaWidth - Change in width (positive = increase, negative = decrease)
+ * @param {number} deltaHeight - Change in height (positive = increase, negative = decrease)
+ */
+function resizeWindow(deltaWidth, deltaHeight) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.error('Cannot resize: window is null or destroyed');
+    return;
+  }
+  
+  console.log(`Resizing window by ${deltaWidth}x${deltaHeight}`);
+  
+  // Temporarily enable resizing for programmatic changes
+  mainWindow.setResizable(true);
+  
+  const bounds = mainWindow.getBounds();
+  const newWidth = Math.max(400, bounds.width + deltaWidth);  // Minimum 400px
+  const newHeight = Math.max(300, bounds.height + deltaHeight);  // Minimum 300px
+  
+  console.log(`Setting window size to ${newWidth}x${newHeight} (was ${bounds.width}x${bounds.height})`);
+  mainWindow.setSize(newWidth, newHeight);
+  
+  // Notify renderer about resize for responsive scaling
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('window-resized', { width: newWidth, height: newHeight });
+  }
+  
+  // Disable resizing again after change
+  mainWindow.setResizable(false);
+  console.log('Window resize complete');
+}
+
+/**
+ * Move window incrementally in a specific direction
+ * @param {string} direction - 'left', 'right', 'top', 'bottom'
+ */
+function moveWindow(direction) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.error('Cannot move: window is null or destroyed');
+    return;
+  }
+  
+  const moveStep = 50;  // Move by 50px each time
+  const bounds = mainWindow.getBounds();
+  const display = screen.getPrimaryDisplay();
+  const workArea = display.workArea;  // Work area excludes taskbar
+  
+  let newX = bounds.x;
+  let newY = bounds.y;
+  
+  switch (direction) {
+    case 'left':
+      newX = Math.max(workArea.x, bounds.x - moveStep);
+      break;
+    case 'right':
+      // Ensure window doesn't go beyond right edge
+      const maxRight = workArea.x + workArea.width - bounds.width;
+      newX = Math.min(maxRight, bounds.x + moveStep);
+      break;
+    case 'top':
+      newY = Math.max(workArea.y, bounds.y - moveStep);
+      break;
+    case 'bottom':
+      // Ensure window doesn't go beyond bottom edge
+      const maxBottom = workArea.y + workArea.height - bounds.height;
+      newY = Math.min(maxBottom, bounds.y + moveStep);
+      break;
+    default:
+      console.error(`Invalid direction: ${direction}`);
+      return;
+  }
+  
+  console.log(`Moving window from (${bounds.x}, ${bounds.y}) to (${newX}, ${newY})`);
+  mainWindow.setPosition(newX, newY);
+  console.log('Window move complete');
+}
 
 // Function to register global shortcut
 // Function to register global shortcuts
@@ -378,6 +481,90 @@ function registerGlobalShortcut() {
       console.error('Registration failed for quit shortcut:', quitShortcut);
     } else {
       console.log('Quit shortcut registered:', quitShortcut);
+    }
+
+    // Resize Window Shortcuts
+    const resizeStep = 50;  // Resize by 50px each time
+
+    // Increase size: Ctrl+Alt+= (equals key, which is + on most keyboards)
+    const retResizePlus = globalShortcut.register('CommandOrControl+Alt+=', () => {
+      console.log('Resize increase shortcut triggered');
+      resizeWindow(resizeStep, resizeStep);
+    });
+
+    if (!retResizePlus) {
+      console.error('Registration failed for resize plus shortcut (Ctrl+Alt+=)');
+      // Try alternative: NumpadAdd
+      const retAlt = globalShortcut.register('CommandOrControl+Alt+NumpadAdd', () => {
+        console.log('Resize increase shortcut triggered (numpad)');
+        resizeWindow(resizeStep, resizeStep);
+      });
+      if (!retAlt) {
+        console.error('Alternative resize plus shortcut also failed');
+      }
+    } else {
+      console.log('Resize increase shortcut registered: Ctrl+Alt+=');
+    }
+
+    // Decrease size: Ctrl+Alt+- (minus key)
+    const retResizeMinus = globalShortcut.register('CommandOrControl+Alt+-', () => {
+      console.log('Resize decrease shortcut triggered');
+      resizeWindow(-resizeStep, -resizeStep);
+    });
+
+    if (!retResizeMinus) {
+      console.error('Registration failed for resize minus shortcut');
+    } else {
+      console.log('Resize decrease shortcut registered: Ctrl+Alt+-');
+    }
+
+    // Position Window Shortcuts
+    // Move left: Ctrl+Alt+Left
+    const retMoveLeft = globalShortcut.register('CommandOrControl+Alt+Left', () => {
+      console.log('Move left shortcut triggered');
+      moveWindow('left');
+    });
+
+    // Move right: Ctrl+Alt+Right
+    const retMoveRight = globalShortcut.register('CommandOrControl+Alt+Right', () => {
+      console.log('Move right shortcut triggered');
+      moveWindow('right');
+    });
+
+    // Move top: Ctrl+Alt+Up
+    const retMoveTop = globalShortcut.register('CommandOrControl+Alt+Up', () => {
+      console.log('Move top shortcut triggered');
+      moveWindow('top');
+    });
+
+    // Move bottom: Ctrl+Alt+Down
+    const retMoveBottom = globalShortcut.register('CommandOrControl+Alt+Down', () => {
+      console.log('Move bottom shortcut triggered');
+      moveWindow('bottom');
+    });
+
+    if (!retMoveLeft) {
+      console.error('Registration failed for move left shortcut');
+    } else {
+      console.log('Move left shortcut registered: Ctrl+Alt+Left');
+    }
+    
+    if (!retMoveRight) {
+      console.error('Registration failed for move right shortcut');
+    } else {
+      console.log('Move right shortcut registered: Ctrl+Alt+Right');
+    }
+    
+    if (!retMoveTop) {
+      console.error('Registration failed for move top shortcut');
+    } else {
+      console.log('Move top shortcut registered: Ctrl+Alt+Up');
+    }
+    
+    if (!retMoveBottom) {
+      console.error('Registration failed for move bottom shortcut');
+    } else {
+      console.log('Move bottom shortcut registered: Ctrl+Alt+Down');
     }
 
   } catch (error) {
