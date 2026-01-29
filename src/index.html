@@ -69,76 +69,102 @@
       <!-- Step 1 -->
       <div id="onboarding-step-1" class="onboarding-step active" data-step="1">
         <h2>Welcome to Noctisai! 👋</h2>
-        <p>Your secure, local AI assistant designed to help you communicate effectively.</p>
+        <p>Your secure, local AI assistant designed for seamless interview and meeting support.</p>
         <div style="margin: 20px 0; background: #333; padding: 16px; border-radius: 8px;">
           <h3>🚀 How it works</h3>
-          <p>This app runs locally on your machine. To give it brains, you need to connect your own AI provider (like
-            Google Gemini, OpenAI, or Groq).</p>
+          <p>This app runs <strong>completely locally</strong> on your machine with zero-knowledge encryption. To give it AI capabilities, you need to connect your own API provider (OpenAI, Groq, Ollama, or any OpenAI-compatible API).</p>
+          <p style="margin-top: 12px; font-size: 0.9em; opacity: 0.8;">✨ All your data stays on your machine - we never see your chats or API keys!</p>
         </div>
       </div>
 
       <!-- Step 2 -->
       <div id="onboarding-step-2" class="onboarding-step" data-step="2">
         <h2>🛠️ Setup API</h2>
-        <p>To start chatting, you need to configure an API Key.</p>
+        <p>To start chatting, you need to configure an API Key from your preferred provider.</p>
         <div style="margin: 20px 0;">
           <ol style="margin-left: 20px; color: #ccc;">
             <li style="margin-bottom: 8px;">Click the <strong>Settings</strong> button <i data-feather="settings"
                 class="icon-tiny"></i> in the top right.</li>
             <li style="margin-bottom: 8px;">Go to the <strong>API</strong> tab.</li>
-            <li style="margin-bottom: 8px;">Select your provider (e.g., Google Gemini) and paste your API Key.</li>
+            <li style="margin-bottom: 8px;">Select your provider (OpenAI, Groq, Ollama, etc.) and paste your API Key.</li>
             <li>Click <strong>Save</strong>.</li>
           </ol>
         </div>
-        <p style="font-size: 0.9em; opacity: 0.7;">Don't have a key? Search for "Gemini API Key" or "Groq API Key" to
-          get one for free.</p>
+        <div style="margin: 20px 0; background: #333; padding: 12px; border-radius: 6px;">
+          <strong style="color: #4a9eff;">Supported Providers:</strong>
+          <ul style="margin: 8px 0 0 20px; color: #ccc; font-size: 0.9em;">
+            <li><strong>OpenAI</strong> - GPT-4, GPT-3.5 (requires API key)</li>
+            <li><strong>Groq</strong> - Llama 3, Mixtral (fast & free tier available)</li>
+            <li><strong>Ollama</strong> - Run models locally (no API key needed)</li>
+            <li><strong>OpenAI-Compatible</strong> - Any API that follows OpenAI's format</li>
+          </ul>
+        </div>
+        <p style="font-size: 0.9em; opacity: 0.7;">💡 <strong>Tip:</strong> Groq offers a free tier - search for "Groq API Key" to get started quickly!</p>
       </div>
 
       <!-- Step 3 -->
       <div id="onboarding-step-3" class="onboarding-step" data-step="3">
-        <h2>👻 Stealth & Tools</h2>
-        <div style="margin: 20px 0; display: grid; gap: 16px;">
+        <h2>⌨️ Keyboard Shortcuts</h2>
+        <p>Master these shortcuts for maximum efficiency:</p>
+        <div style="margin: 20px 0; display: grid; gap: 12px;">
           <div style="background: #333; padding: 12px; border-radius: 6px;">
-            <strong style="color: #4a9eff;">Ghost Typer <i data-feather="type" class="icon-tiny"></i></strong>
+            <strong style="color: #ff9e4a;">Show/Hide <i data-feather="eye-off" class="icon-tiny"></i></strong>
             <p style="margin-top: 4px; font-size: 0.9em;">
-              Press <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+V</code> to human-type
-              your clipboard content.
-              <br><small>(Configurable WPM & stops with ESC)</small>
+              <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+H</code> - Instantly hide or show the app window
             </p>
           </div>
           <div style="background: #333; padding: 12px; border-radius: 6px;">
-            <strong style="color: #ff9e4a;">Stealth Mode <i data-feather="eye-off" class="icon-tiny"></i></strong>
+            <strong style="color: #4a9eff;">Ghost Typer <i data-feather="type" class="icon-tiny"></i></strong>
             <p style="margin-top: 4px; font-size: 0.9em;">
-              Press <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+H</code> to instantly
-              hide or show the app window.
+              <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+V</code> - Human-type clipboard content into any field
+              <br><small>Press <code style="background:#444; padding:2px 4px; border-radius:3px;">ESC</code> to stop</small>
             </p>
           </div>
           <div style="background: #333; padding: 12px; border-radius: 6px;">
             <strong style="color: #ff4a4a;">Quit App <i data-feather="power" class="icon-tiny"></i></strong>
             <p style="margin-top: 4px; font-size: 0.9em;">
-              Press <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+Q</code> to fully exit
-              the application.
+              <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+Q</code> - Fully exit the application
+            </p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #9e4aff;">Window Resize <i data-feather="maximize-2" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">
+              <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+Plus</code> / <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+-</code> - Resize window
+            </p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #4aff9e;">Window Move <i data-feather="move" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">
+              <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+Arrow Keys</code> - Move window position
             </p>
           </div>
         </div>
+        <p style="font-size: 0.85em; opacity: 0.7; margin-top: 12px;">💡 All shortcuts are configurable in Settings. If a shortcut is taken by another app, Noctisai will automatically try fallback shortcuts.</p>
       </div>
 
       <!-- Step 4 -->
       <div id="onboarding-step-4" class="onboarding-step" data-step="4">
-        <h2>🎤 Voice Modes</h2>
-        <p>Supercharge your workflow with voice integration:</p>
-        <div style="margin: 20px 0; display: grid; gap: 16px;">
+        <h2>🎤 Voice & Chat Features</h2>
+        <p>Supercharge your workflow with these powerful features:</p>
+        <div style="margin: 20px 0; display: grid; gap: 12px;">
           <div style="background: #333; padding: 12px; border-radius: 6px;">
             <strong style="color: #4a9eff;">MINE Mode <i data-feather="mic" class="icon-tiny"></i></strong>
-            <p style="margin-top: 4px; font-size: 0.9em;">Uses your microphone. Speak to the AI, and it will auto-fill
-              the chat and send for you.</p>
+            <p style="margin-top: 4px; font-size: 0.9em;">Uses your microphone. Speak to the AI, and it will auto-fill the chat and send for you. Perfect for dictating responses.</p>
           </div>
           <div style="background: #333; padding: 12px; border-radius: 6px;">
             <strong style="color: #ff9e4a;">YOURS Mode <i data-feather="volume-2" class="icon-tiny"></i></strong>
-            <p style="margin-top: 4px; font-size: 0.9em;">Listens to your system audio (screen sharing). Great for
-              getting help during meetings or summarizing videos.</p>
+            <p style="margin-top: 4px; font-size: 0.9em;">Listens to system audio (meetings/interviews). Great for getting real-time help during live conversations or summarizing videos.</p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #9e4aff;">Multiple Chats <i data-feather="message-circle" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">Create separate chat sessions with custom context. Perfect for different scenarios (interviews, coding, meetings).</p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #4aff9e;">Built-in Browser <i data-feather="globe" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">Open links in-app with the built-in browser. Prevents unexpected external browser windows during important moments.</p>
           </div>
         </div>
+        <p style="font-size: 0.85em; opacity: 0.7; margin-top: 12px;">🔒 <strong>Privacy:</strong> All chats are encrypted locally. Screen sharing detection automatically hides sensitive UI elements.</p>
       </div>
 
       <div class="onboarding-actions">
