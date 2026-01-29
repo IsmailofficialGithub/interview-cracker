@@ -90,32 +90,13 @@ function updateMenu() {
 /**
  * Register global hotkeys
  * @param {Function} toggleCallback - Callback for hide/show toggle
+ * @deprecated Shortcuts are now registered in main.js via registerGlobalShortcut()
+ * This function is kept for backwards compatibility but does nothing
  */
 function registerHotkeys(toggleCallback) {
-  // Register CTRL+ALT+H for hide/show (more distinctive, less conflicts)
-  const ret = globalShortcut.register('CommandOrControl+Alt+H', () => {
-    if (toggleCallback) {
-      toggleCallback();
-    }
-  });
-
-  if (!ret) {
-    console.error('Failed to register global shortcut CTRL+ALT+H');
-    // Fallback to CTRL+SHIFT+H if CTRL+ALT+H fails
-    const ret2 = globalShortcut.register('CommandOrControl+Shift+H', () => {
-      if (toggleCallback) {
-        toggleCallback();
-      }
-    });
-    if (!ret2) {
-      console.error('Failed to register fallback shortcut');
-    }
-  }
-
-  // Unregister on app quit
-  app.on('will-quit', () => {
-    globalShortcut.unregisterAll();
-  });
+  // Shortcuts are now handled by main.js's registerGlobalShortcut()
+  // This function is kept to avoid breaking existing code but does nothing
+  console.log('registerHotkeys called - shortcuts are handled by main.js');
 }
 
 /**

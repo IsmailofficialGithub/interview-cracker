@@ -240,5 +240,11 @@ class AuthModal {
   }
 }
 
-module.exports = AuthModal;
+// Export for browser use (ES module or global)
+if (typeof window !== 'undefined') {
+  window.AuthModal = AuthModal;
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = AuthModal;
+}
 

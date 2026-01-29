@@ -88,6 +88,12 @@ function createWindow() {
       mainWindow.setResizable(false);
       mainWindow.focus();
 
+      // Register global shortcuts after window is ready
+      // Small delay to ensure all systems are initialized
+      setTimeout(() => {
+        registerGlobalShortcut();
+      }, 200);
+
       // Open DevTools in development (F12 or Ctrl+Shift+I)
       // if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
       //   // Open DevTools automatically in dev mode
@@ -144,8 +150,7 @@ function createWindow() {
     }
   });
 
-  // Register Global Shortcut
-  registerGlobalShortcut();
+  // Register Global Shortcuts will be called after app is ready (see app.whenReady below)
 
   // Security: Prevent navigation to external URLs
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
@@ -436,140 +441,160 @@ function moveWindow(direction) {
   console.log('Window move complete');
 }
 
+// Function to convert shortcut format from user-friendly to Electron format
+// Converts "Ctrl+Alt+H" to "CommandOrControl+Alt+H"
+function convertShortcutFormat(shortcut) {
+  if (!shortcut) return shortcut;
+  
+  // If already in Electron format, return as-is
+  if (shortcut.includes('CommandOrControl') || shortcut.includes('Control')) {
+    return shortcut;
+  }
+  
+  // Replace Ctrl with CommandOrControl (works on both Windows and macOS)
+  let converted = shortcut.replace(/\bCtrl\b/gi, 'CommandOrControl');
+  
+  // Normalize key names - ensure single letter keys are uppercase
+  const parts = converted.split('+');
+  if (parts.length > 0) {
+    const lastPart = parts[parts.length - 1];
+    // If it's a single character, make it uppercase
+    if (lastPart.length === 1 && /[a-z]/.test(lastPart)) {
+      parts[parts.length - 1] = lastPart.toUpperCase();
+      converted = parts.join('+');
+    }
+  }
+  
+  return converted;
+}
+
 // Function to register global shortcut
 // Function to register global shortcuts
 function registerGlobalShortcut() {
   globalShortcut.unregisterAll();
 
-  try {
-    // Hide/Show Shortcut
-    const ret = globalShortcut.register(currentShortcut, () => {
-      if (mainWindow) {
-        if (mainWindow.isVisible()) {
-          mainWindow.hide();
-        } else {
-          mainWindow.show();
-          mainWindow.focus();
-        }
+  // Helper function to safely register a shortcut
+  const safeRegister = (shortcut, callback, description, fallbacks = []) => {
+    try {
+      // Convert shortcut format if needed
+      const electronShortcut = convertShortcutFormat(shortcut);
+      if (shortcut !== electronShortcut) {
+        console.log(`Converting shortcut: "${shortcut}" -> "${electronShortcut}"`);
       }
-    });
-
-    if (!ret) {
-      console.error('Registration failed for shortcut:', currentShortcut);
-    } else {
-      console.log('Global shortcut registered:', currentShortcut);
+      
+      // Check if already registered by this app
+      if (globalShortcut.isRegistered(electronShortcut)) {
+        // Try to unregister first
+        globalShortcut.unregister(electronShortcut);
+      }
+      
+      const ret = globalShortcut.register(electronShortcut, callback);
+      if (!ret) {
+        console.warn(`Registration failed for shortcut: ${description || shortcut} (tried: ${electronShortcut})`);
+        
+        // Try fallback shortcuts if provided
+        if (fallbacks && fallbacks.length > 0) {
+          for (const fallback of fallbacks) {
+            const fallbackShortcut = convertShortcutFormat(fallback);
+            if (!globalShortcut.isRegistered(fallbackShortcut)) {
+              const fallbackRet = globalShortcut.register(fallbackShortcut, callback);
+              if (fallbackRet) {
+                console.log(`✓ Using fallback shortcut: ${fallbackShortcut} for ${description || shortcut}`);
+                return true;
+              }
+            }
+          }
+        }
+        
+        // Check if shortcut is already registered by another application
+        if (globalShortcut.isRegistered(electronShortcut)) {
+          console.warn(`  Note: Shortcut "${electronShortcut}" is already registered by another application`);
+        }
+        return false;
+      } else {
+        console.log(`✓ Global shortcut registered: ${description || shortcut} (${electronShortcut})`);
+        return true;
+      }
+    } catch (error) {
+      console.error(`Error registering shortcut ${description || shortcut}:`, error.message);
+      return false;
     }
+  };
 
-    // Ghost Type Shortcut
-    const retGhost = globalShortcut.register(ghostTypeShortcut, () => {
-      ghostTyper.typeClipboard(ghostWpm, ghostMistakeChance, ghostMaxMistakes);
-    });
-
-    if (!retGhost) {
-      console.error('Registration failed for ghost shortcut:', ghostTypeShortcut);
-    } else {
-      console.log('Ghost Type shortcut registered:', ghostTypeShortcut);
+  // Hide/Show Shortcut
+  safeRegister(currentShortcut, () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide();
+      } else {
+        mainWindow.show();
+        mainWindow.focus();
+      }
     }
+  }, currentShortcut, ['CommandOrControl+Shift+H', 'CommandOrControl+Alt+Shift+H']);
 
-    // Quit Shortcut
-    const retQuit = globalShortcut.register(quitShortcut, () => {
-      console.log('Quit shortcut triggered, exiting...');
-      app.quit();
-    });
+  // Ghost Type Shortcut
+  safeRegister(ghostTypeShortcut, () => {
+    ghostTyper.typeClipboard(ghostWpm, ghostMistakeChance, ghostMaxMistakes);
+  }, ghostTypeShortcut, ['CommandOrControl+Alt+Shift+V', 'CommandOrControl+Shift+V']);
 
-    if (!retQuit) {
-      console.error('Registration failed for quit shortcut:', quitShortcut);
-    } else {
-      console.log('Quit shortcut registered:', quitShortcut);
-    }
+  // Quit Shortcut
+  safeRegister(quitShortcut, () => {
+    console.log('Quit shortcut triggered, exiting...');
+    app.quit();
+  }, quitShortcut, ['CommandOrControl+Alt+Shift+Q', 'CommandOrControl+Shift+Q']);
 
-    // Resize Window Shortcuts
-    const resizeStep = 50;  // Resize by 50px each time
+  // Resize Window Shortcuts
+  const resizeStep = 50;  // Resize by 50px each time
 
-    // Increase size: Ctrl+Alt+= (equals key, which is + on most keyboards)
-    const retResizePlus = globalShortcut.register('CommandOrControl+Alt+=', () => {
+  // Increase size: Try multiple formats for the plus/equals key
+  const plusFormats = [
+    'CommandOrControl+Alt+Plus',
+    'CommandOrControl+Alt+=',
+    'CommandOrControl+Alt+Shift+='
+  ];
+  
+  let plusRegistered = false;
+  for (const format of plusFormats) {
+    if (safeRegister(format, () => {
       console.log('Resize increase shortcut triggered');
       resizeWindow(resizeStep, resizeStep);
-    });
-
-    if (!retResizePlus) {
-      console.error('Registration failed for resize plus shortcut (Ctrl+Alt+=)');
-      // Try alternative: NumpadAdd
-      const retAlt = globalShortcut.register('CommandOrControl+Alt+NumpadAdd', () => {
-        console.log('Resize increase shortcut triggered (numpad)');
-        resizeWindow(resizeStep, resizeStep);
-      });
-      if (!retAlt) {
-        console.error('Alternative resize plus shortcut also failed');
-      }
-    } else {
-      console.log('Resize increase shortcut registered: Ctrl+Alt+=');
+    }, `Ctrl+Alt+Plus (${format})`)) {
+      plusRegistered = true;
+      break;
     }
-
-    // Decrease size: Ctrl+Alt+- (minus key)
-    const retResizeMinus = globalShortcut.register('CommandOrControl+Alt+-', () => {
-      console.log('Resize decrease shortcut triggered');
-      resizeWindow(-resizeStep, -resizeStep);
-    });
-
-    if (!retResizeMinus) {
-      console.error('Registration failed for resize minus shortcut');
-    } else {
-      console.log('Resize decrease shortcut registered: Ctrl+Alt+-');
-    }
-
-    // Position Window Shortcuts
-    // Move left: Ctrl+Alt+Left
-    const retMoveLeft = globalShortcut.register('CommandOrControl+Alt+Left', () => {
-      console.log('Move left shortcut triggered');
-      moveWindow('left');
-    });
-
-    // Move right: Ctrl+Alt+Right
-    const retMoveRight = globalShortcut.register('CommandOrControl+Alt+Right', () => {
-      console.log('Move right shortcut triggered');
-      moveWindow('right');
-    });
-
-    // Move top: Ctrl+Alt+Up
-    const retMoveTop = globalShortcut.register('CommandOrControl+Alt+Up', () => {
-      console.log('Move top shortcut triggered');
-      moveWindow('top');
-    });
-
-    // Move bottom: Ctrl+Alt+Down
-    const retMoveBottom = globalShortcut.register('CommandOrControl+Alt+Down', () => {
-      console.log('Move bottom shortcut triggered');
-      moveWindow('bottom');
-    });
-
-    if (!retMoveLeft) {
-      console.error('Registration failed for move left shortcut');
-    } else {
-      console.log('Move left shortcut registered: Ctrl+Alt+Left');
-    }
-    
-    if (!retMoveRight) {
-      console.error('Registration failed for move right shortcut');
-    } else {
-      console.log('Move right shortcut registered: Ctrl+Alt+Right');
-    }
-    
-    if (!retMoveTop) {
-      console.error('Registration failed for move top shortcut');
-    } else {
-      console.log('Move top shortcut registered: Ctrl+Alt+Up');
-    }
-    
-    if (!retMoveBottom) {
-      console.error('Registration failed for move bottom shortcut');
-    } else {
-      console.log('Move bottom shortcut registered: Ctrl+Alt+Down');
-    }
-
-  } catch (error) {
-    console.error('Error registering shortcuts:', error);
   }
+  
+  if (!plusRegistered) {
+    console.error('All resize plus shortcut formats failed');
+  }
+
+  // Decrease size: Ctrl+Alt+- (minus key)
+  safeRegister('CommandOrControl+Alt+-', () => {
+    console.log('Resize decrease shortcut triggered');
+    resizeWindow(-resizeStep, -resizeStep);
+  }, 'Ctrl+Alt+-');
+
+  // Position Window Shortcuts
+  safeRegister('CommandOrControl+Alt+Left', () => {
+    console.log('Move left shortcut triggered');
+    moveWindow('left');
+  }, 'Ctrl+Alt+Left');
+
+  safeRegister('CommandOrControl+Alt+Right', () => {
+    console.log('Move right shortcut triggered');
+    moveWindow('right');
+  }, 'Ctrl+Alt+Right');
+
+  safeRegister('CommandOrControl+Alt+Up', () => {
+    console.log('Move top shortcut triggered');
+    moveWindow('top');
+  }, 'Ctrl+Alt+Up');
+
+  safeRegister('CommandOrControl+Alt+Down', () => {
+    console.log('Move bottom shortcut triggered');
+    moveWindow('bottom');
+  }, 'Ctrl+Alt+Down');
 }
 
 // IPC to update shortcuts from renderer
