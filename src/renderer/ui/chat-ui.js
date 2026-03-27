@@ -91,10 +91,31 @@ class ChatUI {
    * @param {string} content - Updated content
    */
   updateLastAssistantMessage(content) {
-    if (this.messages.length > 0 && this.messages[this.messages.length - 1].role === 'assistant') {
-      this.messages[this.messages.length - 1].content = content;
-      this.rerenderMessages();
-      this.autoScroll();
+    if (this.messages.length > 0) {
+      const lastMsgIndex = this.messages.length - 1;
+      const lastMsg = this.messages[lastMsgIndex];
+      
+      if (lastMsg.role === 'assistant') {
+        lastMsg.content = content;
+        
+        // Find the last message element in the DOM
+        const messageDivs = this.chatContainer.querySelectorAll('.message-assistant');
+        if (messageDivs.length > 0) {
+          const lastMessageDiv = messageDivs[messageDivs.length - 1];
+          const contentDiv = lastMessageDiv.querySelector('.message-content');
+          if (contentDiv) {
+            // Render Markdown
+            const html = window.electronAPI ? window.electronAPI.renderMarkdown(content) : content;
+            contentDiv.innerHTML = html;
+            this.autoScroll();
+            return;
+          }
+        }
+        
+        // Fallback if DOM element not found
+        this.rerenderMessages();
+        this.autoScroll();
+      }
     }
   }
   

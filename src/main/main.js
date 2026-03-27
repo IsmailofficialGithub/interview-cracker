@@ -67,12 +67,14 @@ function createWindow() {
     const { app } = require('electron');
     const userDataPath = app.getPath('userData');
     const configPath = path.join(userDataPath, '.config.enc');
+    console.log('[MAIN] APP STARTED. User Data Path:', userDataPath);
+    console.log('[MAIN] Config file location:', configPath);
 
     // Check if config exists (don't try to decrypt here, just check default)
     // Will be properly loaded after authentication
     // For now, default to always on top
   } catch (error) {
-    // Ignore errors, use default
+    console.error('[MAIN] Startup path check failure:', error);
   }
 
   // Load HTML file

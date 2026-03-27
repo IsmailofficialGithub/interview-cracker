@@ -176,17 +176,9 @@ async function loadApplication() {
       // Setup/update global toggle handler for inline onclick handlers
       // This ensures the handler uses the initialized instance
       window.handleVoiceModeToggle = async (mode) => {
-        console.log('=== RENDERER.JS TOGGLE HANDLER FIRED ===', mode);
-        if (voiceAssistant && typeof voiceAssistant.setMode === 'function') {
-          try {
-            console.log('Calling voiceAssistant.setMode with:', mode);
-            await voiceAssistant.setMode(mode);
-            console.log('Mode switched successfully to:', mode);
-          } catch (error) {
-            console.error('Error switching voice mode:', error);
-          }
-        } else {
-          console.warn('VoiceAssistant not available or setMode not found in renderer.js handler');
+        console.log('[Renderer] handleVoiceModeToggle called:', mode);
+        if (window.voiceAssistant) {
+          await window.voiceAssistant.setMode(mode);
         }
       };
       console.log('✅ handleVoiceModeToggle handler updated in renderer.js');
