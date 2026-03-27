@@ -163,6 +163,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onEmbeddedWindowClosed: (callback) => {
     ipcRenderer.on('embedded-window-closed', (event, data) => callback(data));
     return () => ipcRenderer.removeListener('embedded-window-closed', callback);
+  },
+
+  // Auto-Update
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  checkVersionStatus: (remoteConfig) => ipcRenderer.invoke('check-version-status', remoteConfig),
+  startUpdateDownload: () => ipcRenderer.invoke('start-update-download'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  
+  // Auto-Update Events
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on('update-available', (event, info) => callback(info));
+    return () => ipcRenderer.removeListener('update-available', callback);
+  },
+  onUpdateNotAvailable: (callback) => {
+    ipcRenderer.on('update-not-available', callback);
+    return () => ipcRenderer.removeListener('update-not-available', callback);
+  },
+  onUpdateDownloadProgress: (callback) => {
+    ipcRenderer.on('update-download-progress', (event, progress) => callback(progress));
+    return () => ipcRenderer.removeListener('update-download-progress', callback);
+  },
+  onUpdateDownloaded: (callback) => {
+    ipcRenderer.on('update-downloaded', callback);
+    return () => ipcRenderer.removeListener('update-downloaded', callback);
+  },
+  onUpdateError: (callback) => {
+    ipcRenderer.on('update-error', (event, message) => callback(message));
+    return () => ipcRenderer.removeListener('update-error', callback);
   }
 });
 

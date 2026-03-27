@@ -302,6 +302,7 @@
   <!-- End Main Content Area -->
 
   <script src="./renderer/ui/voice-assistant.js"></script>
+  <script src="./renderer/ui/update-manager.js"></script>
   <script>
     // Define a robust global handler early - this will capture clicks even before VoiceAssistant is ready
     window.handleVoiceModeToggle = function(mode) {
@@ -605,6 +606,11 @@
 
           // Trigger Onboarding Check
           if (typeof checkOnboarding === 'function') checkOnboarding();
+          
+          // Trigger Update Check
+          if (window.updateManager && typeof window.updateManager.checkForUpdates === 'function') {
+            window.updateManager.checkForUpdates();
+          }
         }
       }, 1000);
     });
