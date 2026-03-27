@@ -2480,37 +2480,56 @@
     }
 
     async loadConfig() {
+      console.log('[SettingsPanel] Loading config...');
       try {
         const result = await window.electronAPI.getConfig();
+        console.log('[SettingsPanel] Loaded config with result:', result);
         if (result.success) {
           this.config = result.data || { accounts: [], settings: {} };
-
+          console.log('[SettingsPanel] Config object keys:', Object.keys(this.config));
+          console.log('[SettingsPanel] Accounts data:', this.config.accounts);
+          console.log('[SettingsPanel] Config applied. Accounts count:', this.config.accounts ? this.config.accounts.length : 0);
+          
           // Sync settings with main process
           if (this.config.settings) {
-            if (this.config.settings.ghostWpm) {
+            console.log('[SettingsPanel] Syncing settings with main process...');
+            if (this.config.settings.ghostWpm && typeof window.electronAPI.updateGhostWpm === 'function') {
               window.electronAPI.updateGhostWpm(this.config.settings.ghostWpm);
             }
-            if (this.config.settings.ghostMistakeChance !== undefined) {
+            if (this.config.settings.ghostMistakeChance !== undefined && typeof window.electronAPI.updateGhostMistakeChance === 'function') {
               window.electronAPI.updateGhostMistakeChance(this.config.settings.ghostMistakeChance);
             }
-            if (this.config.settings.ghostMaxMistakes !== undefined) {
+            if (this.config.settings.ghostMaxMistakes !== undefined && typeof window.electronAPI.updateGhostMaxMistakes === 'function') {
               window.electronAPI.updateGhostMaxMistakes(this.config.settings.ghostMaxMistakes);
             }
           }
         } else {
+          console.error('[SettingsPanel] Failed to load config:', result.error);
           this.config = { accounts: [], settings: {} };
         }
       } catch (error) {
-        console.error('Failed to load config:', error);
+        console.error('[SettingsPanel] ERROR loading config:', error);
         this.config = { accounts: [], settings: {} };
       }
     }
 
     async show() {
       if (this.isOpen) return;
-
+      
+      console.log('[SettingsPanel] Opening settings...');
       await this.loadConfig();
+      
+      // Ensure we have a valid config before rendering
+      if (!this.config) {
+        this.config = { accounts: [], settings: {} };
+      }
+      
+      this.isOpen = true;
+      document.body.classList.add('settings-open');
+      this.render();
+    }
 
+    render() {
       const panelHTML = `
         <div id="settings-panel" class="settings-panel-overlay">
           <div class="settings-panel-content">
@@ -2540,7 +2559,11 @@
 
       document.body.insertAdjacentHTML('beforeend', panelHTML);
       this.panel = document.getElementById('settings-panel');
-      this.isOpen = true;
+
+      // Initialize Feather icons if available
+      if (typeof feather !== 'undefined') {
+        feather.replace();
+      }
 
       document.getElementById('settings-close').addEventListener('click', () => {
         this.hide();
@@ -2566,8 +2589,8 @@
                 <strong>${acc.name || 'Untitled Account'}</strong>
                 <span class="account-type">${acc.type}</span>
               </div>
-              <button class="account-edit-btn" data-index="${idx}" style="background: #0066cc; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: default; margin-right: 8px;">Edit</button>
-              <button class="account-delete-btn" data-index="${idx}" style="background: #cc0000; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: default;">Delete</button>
+              <button class="account-edit-btn" data-index="${idx}" style="background: #0066cc; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 8px;">Edit</button>
+              <button class="account-delete-btn" data-index="${idx}" style="background: #cc0000; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Delete</button>
             </div>
           `).join('')}
           ${accounts.length === 0 ? '<p style="color: #999; margin-bottom: 20px;">No accounts configured. Add one below.</p>' : ''}
@@ -2820,8 +2843,11 @@
           document.getElementById('account-name').value = '';
           document.getElementById('account-type').value = 'openai';
           document.getElementById('account-api-key').value = '';
+          document.getElementById('account-api-key').placeholder = 'Enter API key'; // Reset placeholder
           document.getElementById('account-model').value = '';
           document.getElementById('account-base-url').value = '';
+          // Trigger type change to update visibility and model dropdown
+          document.getElementById('account-type').dispatchEvent(new Event('change'));
         });
       }
 
@@ -2842,7 +2868,17 @@
           document.getElementById('account-index').value = index;
           document.getElementById('account-name').value = account.name || '';
           document.getElementById('account-type').value = account.type || 'openai';
-          document.getElementById('account-api-key').value = ''; // Don't show existing key
+          
+          // Don't show existing key for security, but show a placeholder if it exists
+          const apiKeyField = document.getElementById('account-api-key');
+          if (account.apiKey) {
+            apiKeyField.value = '';
+            apiKeyField.placeholder = '•••••••••••••••• (Saved)';
+          } else {
+            apiKeyField.value = '';
+            apiKeyField.placeholder = 'Enter API Key';
+          }
+          
           document.getElementById('account-base-url').value = account.baseURL || '';
 
           // Update model dropdown first
@@ -3062,13 +3098,14 @@
 
     async saveAccount() {
       const index = parseInt(document.getElementById('account-index').value);
+      const apiKeyInput = document.getElementById('account-api-key').value;
+      
+      // Get current model value correctly (select vs custom)
       const modelSelect = document.getElementById('account-model');
-      const modelCustomInput = document.getElementById('account-model-custom');
-
-      // Get model value (from dropdown or custom input)
-      let modelValue = modelSelect.value;
-      if (modelValue === '__custom__' && modelCustomInput) {
-        modelValue = modelCustomInput.value.trim();
+      const modelCustom = document.getElementById('account-model-custom');
+      let modelValue = modelSelect ? modelSelect.value : '';
+      if (modelValue === '__custom__' && modelCustom) {
+        modelValue = modelCustom.value;
       }
 
       if (!modelValue) {
@@ -3098,35 +3135,41 @@
         name: document.getElementById('account-name').value,
         type: document.getElementById('account-type').value,
         model: modelValue,
-        apiKey: document.getElementById('account-api-key').value || '',
+        apiKey: apiKeyInput,
         baseURL: document.getElementById('account-base-url').value || undefined
       };
+
+      // Ensure accounts array exists
+      if (!this.config.accounts) {
+        this.config.accounts = [];
+      }
 
       // If editing and API key is empty, preserve existing key
       if (index >= 0 && !account.apiKey && this.config.accounts[index]) {
         account.apiKey = this.config.accounts[index].apiKey || '';
       }
 
-      if (!this.config.accounts) {
-        this.config.accounts = [];
-      }
-
       if (index >= 0) {
         this.config.accounts[index] = account;
       } else {
+        // Validation for new account
+        if (!account.apiKey) {
+          alert('API Key is required for new accounts');
+          return;
+        }
         this.config.accounts.push(account);
       }
 
       await this.saveConfig();
-
+      
+      // Close form and refresh view
+      document.getElementById('account-form').style.display = 'none';
       this.hide();
+      this.show();
 
-      this.hide();
-
-      // Notify main app to refresh
+      // Notify other components (like VoiceAssistant)
       window.dispatchEvent(new CustomEvent('config-updated'));
-
-      alert('Account saved successfully! The provider dropdown will update automatically.');
+      console.log('[SettingsPanel] Account saved and config-updated event dispatched');
     }
 
     async savePrivacySettings() {
@@ -3176,7 +3219,9 @@
         const newGhostWpm = parseInt(ghostWpmInput.value) || 60;
         if (newGhostWpm && this.config.settings.ghostWpm !== newGhostWpm) {
           this.config.settings.ghostWpm = newGhostWpm;
-          await window.electronAPI.updateGhostWpm(newGhostWpm);
+          if (typeof window.electronAPI.updateGhostWpm === 'function') {
+            await window.electronAPI.updateGhostWpm(newGhostWpm);
+          }
         }
       }
 
@@ -3185,7 +3230,9 @@
         const newChance = parseInt(mistakeChanceInput.value);
         if (!isNaN(newChance) && this.config.settings.ghostMistakeChance !== newChance) {
           this.config.settings.ghostMistakeChance = newChance;
-          await window.electronAPI.updateGhostMistakeChance(newChance);
+          if (typeof window.electronAPI.updateGhostMistakeChance === 'function') {
+            await window.electronAPI.updateGhostMistakeChance(newChance);
+          }
         }
       }
 
@@ -3194,7 +3241,9 @@
         const newMax = parseInt(maxMistakesInput.value);
         if (newMax && this.config.settings.ghostMaxMistakes !== newMax) {
           this.config.settings.ghostMaxMistakes = newMax;
-          await window.electronAPI.updateGhostMaxMistakes(newMax);
+          if (typeof window.electronAPI.updateGhostMaxMistakes === 'function') {
+            await window.electronAPI.updateGhostMaxMistakes(newMax);
+          }
         }
       }
 
@@ -3221,6 +3270,8 @@
       }
 
       await this.saveConfig();
+      // Dispatch event for other components (like VoiceAssistant) to reload
+      window.dispatchEvent(new CustomEvent('config-updated'));
       alert('Settings saved');
     }
 
@@ -3230,6 +3281,8 @@
         if (!result.success) {
           throw new Error(result.error);
         }
+        // Also dispatch here for general sync
+        window.dispatchEvent(new CustomEvent('config-updated'));
       } catch (error) {
         console.error('Failed to save config:', error);
         if (window.logsPanel) {
@@ -4119,10 +4172,19 @@
         return !whisperModels.includes(acc.model);
       });
 
-      validAccounts.forEach(acc => {
+      // Show all accounts in the UI, but disable the voice-only ones
+      config.accounts.forEach(acc => {
         const option = document.createElement('option');
         option.value = acc.name;
+        
+        const isWhisper = acc.model && whisperModels.includes(acc.model);
         option.textContent = acc.name + (acc.model ? ` (${acc.model})` : '');
+        
+        if (isWhisper) {
+          option.disabled = true;
+          option.textContent += ' [Voice Only]';
+        }
+        
         selector.appendChild(option);
       });
 
@@ -4145,6 +4207,7 @@
             }
           } else {
             currentProviderId = null;
+            selector.value = ''; // Ensure we fall back to "No provider" explicitly
           }
         } else {
           selector.value = currentProviderId;
@@ -4197,134 +4260,7 @@
     }
   }
 
-  async function loadConfig() {
-    try {
-      const result = await window.electronAPI.getConfig();
-      if (result.success) {
-        config = result.data;
-      } else {
-        config = { accounts: [], settings: {} };
-      }
-    } catch (error) {
-      console.error('Failed to load config:', error);
-      config = { accounts: [], settings: {} };
-    }
-  }
-
-  // Chat Management Functions
-  async function loadChatsList() {
-    const chatsList = document.getElementById('chats-list');
-    if (!chatsList) return;
-
-    try {
-      const result = await window.electronAPI.listChats();
-      if (result.success && result.chats) {
-        if (result.chats.length === 0) {
-          chatsList.innerHTML = '<div class="chats-empty">No chats yet. Create a new chat to get started!</div>';
-          return;
-        }
-
-        chatsList.innerHTML = result.chats.map(chat => {
-          const date = new Date(chat.date);
-          const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          const isActive = chat.id === chatUI.currentChatId;
-
-          return `
-            <div class="chat-item ${isActive ? 'active' : ''}" data-chat-id="${chat.id}">
-              <div class="chat-item-info">
-                <div class="chat-item-name">${escapeHtml(chat.name)}</div>
-                <div class="chat-item-preview">${escapeHtml(chat.preview)}</div>
-                <div class="chat-item-date">${dateStr}</div>
-              </div>
-              <div class="chat-item-actions">
-                <button class="chat-delete-btn" data-chat-id="${chat.id}" title="Delete chat">🗑️</button>
-              </div>
-            </div>
-          `;
-        }).join('');
-
-        // Add click handlers
-        chatsList.querySelectorAll('.chat-item').forEach(item => {
-          item.addEventListener('click', (e) => {
-            if (!e.target.classList.contains('chat-delete-btn')) {
-              const chatId = item.dataset.chatId;
-              loadChat(chatId);
-            }
-          });
-        });
-
-        // Add delete handlers
-        chatsList.querySelectorAll('.chat-delete-btn').forEach(btn => {
-          btn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const chatId = btn.dataset.chatId;
-            if (confirm(`Are you sure you want to delete "${chatId === 'default' ? 'Default Chat' : chatId}"?`)) {
-              await deleteChat(chatId);
-            }
-          });
-        });
-      } else {
-        chatsList.innerHTML = '<div class="chats-empty">Failed to load chats.</div>';
-      }
-    } catch (error) {
-      console.error('Failed to load chats list:', error);
-      chatsList.innerHTML = '<div class="chats-empty">Error loading chats.</div>';
-    }
-  }
-
-  async function createNewChat() {
-    const chatId = 'chat-' + Date.now();
-    chatUI.currentChatId = chatId;
-    chatUI.messages = [];
-    chatUI.rerenderMessages();
-
-    // Hide sidebar
-    const chatsSidebar = document.getElementById('chats-sidebar');
-    if (chatsSidebar) {
-      chatsSidebar.style.display = 'none';
-      document.body.classList.remove('sidebar-open');
-    }
-
-    // Reload chats list
-    await loadChatsList();
-  }
-
-  async function loadChat(chatId) {
-    chatUI.currentChatId = chatId;
-    await chatUI.loadChatHistory();
-
-    // Hide sidebar
-    const chatsSidebar = document.getElementById('chats-sidebar');
-    if (chatsSidebar) {
-      chatsSidebar.style.display = 'none';
-      document.body.classList.remove('sidebar-open');
-    }
-
-    // Reload chats list to update active state
-    await loadChatsList();
-  }
-
-  async function deleteChat(chatId) {
-    try {
-      const result = await window.electronAPI.deleteChat(chatId);
-      if (result.success) {
-        // If we deleted the current chat, switch to default
-        if (chatId === chatUI.currentChatId) {
-          chatUI.currentChatId = 'default';
-          chatUI.messages = [];
-          chatUI.rerenderMessages();
-        }
-
-        // Reload chats list
-        await loadChatsList();
-      } else {
-        alert('Failed to delete chat: ' + (result.error || 'Unknown error'));
-      }
-    } catch (error) {
-      console.error('Failed to delete chat:', error);
-      alert('Failed to delete chat: ' + error.message);
-    }
-  }
+  // Redundant functions removed
 
   function escapeHtml(text) {
     const div = document.createElement('div');
@@ -4417,66 +4353,6 @@
       console.error('Failed to load chats list:', error);
       chatsList.innerHTML = '<div class="chats-empty">Error loading chats.</div>';
     }
-  }
-
-  async function createNewChat() {
-    const chatId = 'chat-' + Date.now();
-    chatUI.currentChatId = chatId;
-    chatUI.messages = [];
-    chatUI.rerenderMessages();
-
-    // Hide sidebar
-    const chatsSidebar = document.getElementById('chats-sidebar');
-    if (chatsSidebar) {
-      chatsSidebar.style.display = 'none';
-      document.body.classList.remove('sidebar-open');
-    }
-
-    // Reload chats list
-    await loadChatsList();
-  }
-
-  async function loadChat(chatId) {
-    chatUI.currentChatId = chatId;
-    await chatUI.loadChatHistory();
-
-    // Hide sidebar
-    const chatsSidebar = document.getElementById('chats-sidebar');
-    if (chatsSidebar) {
-      chatsSidebar.style.display = 'none';
-      document.body.classList.remove('sidebar-open');
-    }
-
-    // Reload chats list to update active state
-    await loadChatsList();
-  }
-
-  async function deleteChat(chatId) {
-    try {
-      const result = await window.electronAPI.deleteChat(chatId);
-      if (result.success) {
-        // If we deleted the current chat, switch to default
-        if (chatId === chatUI.currentChatId) {
-          chatUI.currentChatId = 'default';
-          chatUI.messages = [];
-          chatUI.rerenderMessages();
-        }
-
-        // Reload chats list
-        await loadChatsList();
-      } else {
-        alert('Failed to delete chat: ' + (result.error || 'Unknown error'));
-      }
-    } catch (error) {
-      console.error('Failed to delete chat:', error);
-      alert('Failed to delete chat: ' + error.message);
-    }
-  }
-
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
   }
 
   // Expose functions for settings panel

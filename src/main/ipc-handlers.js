@@ -342,31 +342,44 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
 
   // Get config
   ipcMain.handle('get-config', async () => {
+    console.log('[IPC] getConfig called');
     try {
       const key = getSessionKey();
       if (!key) {
+        console.error('[IPC] getConfig error: Not authenticated');
         return { success: false, error: 'Not authenticated' };
       }
 
       const config = await readEncryptedJSON('.config.enc', key);
+      
+      console.log('[IPC] Config read result:', {
+        hasConfig: !!config,
+        hasAccounts: config && config.accounts ? config.accounts.length : 0,
+        hasSettings: config && config.settings ? Object.keys(config.settings).length : 0
+      });
+      
       return { success: true, data: config || { accounts: [], settings: {} } };
     } catch (error) {
-      return { success: false, error: error.message };
+      console.error('[IPC] getConfig error:', error);
+      return { success: false, error: 'Failed to read secure config: ' + error.message };
     }
   });
 
   // Save config
   ipcMain.handle('save-config', async (event, config) => {
+    console.log('[IPC] saveConfig called with accounts count:', config?.accounts?.length || 0);
     try {
       const key = getSessionKey();
       if (!key) {
+        console.error('[IPC] saveConfig error: Not authenticated');
         return { success: false, error: 'Not authenticated' };
       }
-
+      
       await writeEncryptedJSON('.config.enc', config, key);
+      console.log('[IPC] saveConfig success');
       return { success: true };
     } catch (error) {
-      securityMonitor.logError(error);
+      console.error('[IPC] saveConfig error:', error);
       return { success: false, error: error.message };
     }
   });
@@ -775,7 +788,9 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       const path = require('path');
       const { app } = require('electron');
 
+      console.log(`[IPC] transcribe-audio handle START - provider: ${providerType}, model: ${model}`);
       if (!apiKey) {
+        console.error('[IPC] transcribe-audio Error: API key missing');
         return { success: false, error: 'API key required for Whisper transcription' };
       }
 
@@ -805,6 +820,7 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
 
       // Write audio buffer to file if not using file path
       if (audioBuffer) {
+        console.log(`[IPC] Writing audio buffer to temp file: ${tempFile} (${audioBuffer.length} bytes)`);
         fs.writeFileSync(tempFile, audioBuffer);
       }
 
