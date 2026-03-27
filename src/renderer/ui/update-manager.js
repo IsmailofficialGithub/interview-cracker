@@ -9,6 +9,7 @@ class UpdateManager {
     this.currentStatus = 'checked';
     this.modal = null;
     this.isInitialized = false;
+    this.isSimulated = false;
 
     // Bind listeners
     this.setupListeners();
@@ -145,6 +146,8 @@ class UpdateManager {
       modalContent.querySelector('#update-progress-container').style.display = 'block';
 
       try {
+        // MUST check natively first so electron-updater knows what to download
+        await window.electronAPI.checkForUpdates();
         await window.electronAPI.startUpdateDownload();
       } catch (err) {
         this.showError(err.message);
@@ -197,7 +200,12 @@ class UpdateManager {
 
     const installBtn = this.modal.querySelector('#install-now-btn');
     installBtn.addEventListener('click', () => {
-      window.electronAPI.installUpdate();
+      if (this.isSimulated) {
+        alert('Simulation Complete: The app would now restart and install the update.');
+        location.reload();
+      } else {
+        window.electronAPI.installUpdate();
+      }
     });
   }
 
@@ -221,6 +229,7 @@ class UpdateManager {
    * Simulation for testing UI
    */
   async simulateUpdate(isForce = false) {
+    this.isSimulated = true;
     console.log('[UpdateManager] Simulating update UI...');
     this.showUpdateModal('2.0.0-mock', isForce, '1.5.0');
 
