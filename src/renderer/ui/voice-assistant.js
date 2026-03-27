@@ -10,10 +10,10 @@ class VoiceAssistant {
     this.mode = 'mine'; // 'mine' or 'yours'
     this.isActive = false;
     this.isProcessing = false;
-      
+
     // Initialize logging panel if available
     // this.initLogs(); // Note: method does not exist in this file
-      
+
     console.log('[VoiceAssistant] Constructor initialized. Mode: mine');
     this.loadConfig().then(() => {
       console.log('[VoiceAssistant] Initial config loaded. Accounts count:', this.config?.accounts?.length || 0);
@@ -64,10 +64,10 @@ class VoiceAssistant {
     this.voiceActivityCheckInterval = null;
     this.isSpeaking = false;
     this.silenceStartTime = null;
-    this.silenceDurationThreshold = 800; // 0.8 seconds of silence before processing (faster)
+    this.silenceDurationThreshold = 400; // Reduced from 800ms for much faster response
     this.speechThreshold = -50;  // Lowered from -40 to detect quieter system audio
-    this.silenceThreshold = -65; // Lowered from -50 to prevent false speech cutoffs
-    this.minRecordingDuration = 500; // Minimum 0.5 seconds of recording
+    this.silenceThreshold = -58; // Increased from -65 so slight background noise counts as silence
+    this.minRecordingDuration = 200; // Reduced from 500ms to allow faster turnaround
     this.maxRecordingDuration = 30000; // Maximum 30 seconds of recording
     this.recordingStartTime = null;
     this.accumulatedChunks = []; // Store chunks while speaking
@@ -81,13 +81,13 @@ class VoiceAssistant {
     this.chatUI = chatUI;
     await this.loadConfig();
     this.setupUI();
-    
+
     // Register global toggle handler for index.html/other UI parts to call
     window.handleVoiceModeToggle = async (mode) => {
       console.log('[VoiceAssistant] Global toggle handler called:', mode);
       await this.setMode(mode);
     };
-    
+
     console.log('[VoiceAssistant] Initialized and global toggle handler attached');
   }
 
@@ -105,10 +105,29 @@ class VoiceAssistant {
           settings: this.config.settings
         });
 
-        // Get voice API setting from settings (user's preference)
+        // Get settings (user's preference)
         const settings = this.config.settings || {};
         const voiceAPI = settings.voiceAPI || 'groq-whisper'; // Default to Groq Whisper
+
+        // Update silence thresholds from user settings
+        if (settings.voiceSilenceThreshold) {
+          this.silenceDurationThreshold = settings.voiceSilenceThreshold;
+        } else {
+          this.silenceDurationThreshold = 400; // Default
+        }
+
+        // Sensitivity (dB) mapping
+        if (settings.voiceSensitivity) {
+          this.silenceThreshold = settings.voiceSensitivity;
+        } else {
+          this.silenceThreshold = -52; // Default more lenient value
+        }
         
+        console.log('[VoiceAssistant] VAD Config:', {
+          duration: `${this.silenceDurationThreshold}ms`,
+          dbThreshold: `${this.silenceThreshold}dB`
+        });
+
         console.log('[VoiceAssistant] Voice API setting:', voiceAPI);
 
         // Find accounts
@@ -189,7 +208,7 @@ class VoiceAssistant {
         // Create if it doesn't exist
         console.log('[VoiceAssistant] Mode toggle missing from DOM, creating new one...');
         modeToggle = this.createModeToggle();
-        
+
         // Try multiple selectors to find input area
         let inputArea = document.querySelector('.input-area');
         if (!inputArea) {
@@ -209,7 +228,7 @@ class VoiceAssistant {
           console.error('[VoiceAssistant] Could not find input area to insert mode toggle switch');
         }
       }
- else {
+      else {
         console.log('[VoiceAssistant] Mode toggle switch found in DOM, ensuring handlers are attached');
         // Re-attach or ensure onclick handlers are present on static HTML elements
         const mine = modeToggle.querySelector('[data-mode="mine"]');
@@ -316,8 +335,8 @@ class VoiceAssistant {
 
     // 1. Ensure the toggle is in the ACTIVE DOM
     let modeToggle = document.getElementById('voice-mode-toggle');
-    const inputArea = document.querySelector('.input-area') || document.querySelector('.chat-input-area') || 
-                     (document.getElementById('message-input')?.parentElement);
+    const inputArea = document.querySelector('.input-area') || document.querySelector('.chat-input-area') ||
+      (document.getElementById('message-input')?.parentElement);
 
     if (inputArea) {
       if (!modeToggle) {
@@ -334,12 +353,12 @@ class VoiceAssistant {
         inputArea.insertBefore(modeToggle, inputArea.firstChild);
       }
     }
-    
+
     if (modeToggle) {
       this.modeButton = modeToggle;
       // Update visual state
       const toggleOptions = modeToggle.querySelectorAll('.toggle-option');
-      
+
       if (this.mode === 'yours') {
         modeToggle.classList.add('yours-mode');
       } else {
@@ -354,7 +373,7 @@ class VoiceAssistant {
           option.classList.remove('active');
         }
       });
-      
+
       // Re-initialize icons if needed
       if (typeof feather !== 'undefined') {
         feather.replace();
@@ -372,7 +391,7 @@ class VoiceAssistant {
         listenButton.classList.remove('active');
         listenButton.innerHTML = `<i data-feather="mic" class="icon"></i> Start Assistant`;
       }
-      
+
       // Re-initialize icons
       if (typeof feather !== 'undefined') {
         feather.replace();
@@ -596,7 +615,7 @@ class VoiceAssistant {
         const source = this.audioContext.createMediaStreamSource(this.audioStream);
         this.analyserNode = this.audioContext.createAnalyser();
         this.analyserNode.fftSize = 256;
-        this.analyserNode.smoothingTimeConstant = 0.8;
+        this.analyserNode.smoothingTimeConstant = 0.1; // Reduced from 0.8 for instant volume changes
         source.connect(this.analyserNode);
         console.log('AudioContext created for VAD in MINE mode');
       } catch (error) {
@@ -640,7 +659,7 @@ class VoiceAssistant {
       if (this.analyserNode) {
         this.voiceActivityCheckInterval = setInterval(() => {
           this.checkVoiceActivity();
-        }, 100); // Check every 100ms
+        }, 40); // 25 times per second for ultra-low latency detection
         console.log('VAD checking started for MINE mode');
       }
 
@@ -667,7 +686,7 @@ class VoiceAssistant {
       // Calculate average volume
       const sum = dataArray.reduce((a, b) => a + b, 0);
       const average = sum / dataArray.length;
-      
+
       // Convert to dB (0-255 range, normalize and convert to dB)
       // Avoid log(0) by adding small value
       const normalized = average / 255;
@@ -734,7 +753,7 @@ class VoiceAssistant {
     try {
       // Stop the recorder
       this.mediaRecorder.stop();
-      
+
       // The onstop handler will process the audio
       // Reset state for next recording
       this.isSpeaking = false;
@@ -794,7 +813,7 @@ class VoiceAssistant {
           },
           video: true // Required for getDisplayMedia
         });
-        
+
         console.log('[VoiceAssistant] YOURS: getDisplayMedia returned stream:', stream.id);
         // We only care about audio, stop video trace immediately to save resources
         stream.getVideoTracks().forEach(track => {
@@ -806,7 +825,7 @@ class VoiceAssistant {
         console.log('[VoiceAssistant] YOURS: getDisplayMedia failed, attempting desktopCapturer fallback...', displayMediaError);
         const sourcesResult = await window.electronAPI.getDesktopSources({ types: ['screen', 'window'] });
         console.log('[VoiceAssistant] YOURS: Desktop sources response:', sourcesResult);
-        
+
         if (!sourcesResult.success || sourcesResult.sources.length === 0) {
           throw new Error('No system audio sources found. Please ensure screen recording permissions are granted.');
         }
@@ -842,7 +861,7 @@ class VoiceAssistant {
       // Verify audio tracks
       const audioTracks = stream.getAudioTracks();
       console.log('[VoiceAssistant] YOURS: Audio tracks found:', audioTracks.length);
-      
+
       if (audioTracks.length === 0) {
         throw new Error('No audio tracks captured. This usually means "Share System Audio" was not checked in the screen share picker.');
       }
@@ -859,7 +878,7 @@ class VoiceAssistant {
         const source = this.audioContext.createMediaStreamSource(this.audioStream);
         this.analyserNode = this.audioContext.createAnalyser();
         this.analyserNode.fftSize = 256;
-        this.analyserNode.smoothingTimeConstant = 0.8;
+        this.analyserNode.smoothingTimeConstant = 0.1; // Reduced from 0.8 for instant volume changes
         source.connect(this.analyserNode);
         console.log('[VoiceAssistant] YOURS: AudioContext and AnalyserNode setup complete');
       } catch (vadError) {
@@ -905,7 +924,7 @@ class VoiceAssistant {
       if (this.analyserNode) {
         this.voiceActivityCheckInterval = setInterval(() => {
           this.checkVoiceActivity();
-        }, 100);
+        }, 40); // Same for YOURS mode
         console.log('[VoiceAssistant] YOURS: VAD checking started');
       }
 
@@ -960,10 +979,9 @@ class VoiceAssistant {
       const arrayBuffer = await audioBlob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
 
-      // Get API Key and provider from config
-      await this.loadConfig();
-      
-      const account = this.config.accounts?.find(acc => 
+      // Removed redundant loadConfig() to speed up processing loop
+
+      const account = this.config.accounts?.find(acc =>
         (acc.type === 'openai' || acc.type === 'groq') && acc.apiKey
       );
 
@@ -972,14 +990,14 @@ class VoiceAssistant {
       }
 
       console.log(`[VoiceAssistant] Using provider: ${account.type}, model: ${this.whisperModel || 'auto'}`);
-      
+
       const transcriptionResult = await window.electronAPI.transcribeAudio(
         Array.from(uint8Array),
         account.apiKey,
         account.type,
         this.whisperModel || (account.type === 'groq' ? 'whisper-large-v3-turbo' : 'whisper-1')
       );
-      
+
       console.log('[VoiceAssistant] Transcription result received:', transcriptionResult.success ? 'SUCCESS' : 'FAILED');
       if (!transcriptionResult.success) console.error('[VoiceAssistant] Transcription error detail:', transcriptionResult.error);
 

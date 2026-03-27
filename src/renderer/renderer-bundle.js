@@ -2776,6 +2776,28 @@
               For Groq: Use whisper-large-v3-turbo (fastest). For OpenAI: Use whisper-1
             </small>
           </div>
+          <div class="setting-item" style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 8px;">
+              Silent Wait Time (ms):
+            </label>
+            <input type="number" id="voice-silence-threshold" value="${settings.voiceSilenceThreshold || 250}" min="50" max="2000" step="50" style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 6px; font-size: 14px;" />
+            <small style="display: block; margin-top: 4px; color: #999; font-size: 11px;">
+              How long you must be silent (in milliseconds) before the AI triggers. (Fast: 200, Calm: 800)
+            </small>
+          </div>
+          <div class="setting-item" style="margin-bottom: 24px;">
+            <label style="display: block; margin-bottom: 8px;">
+              Voice Sensitivity:
+            </label>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 11px; color: #888;">Noisy Room</span>
+              <input type="range" id="voice-sensitivity" min="-70" max="-35" step="1" value="${settings.voiceSensitivity || -52}" style="flex: 1; cursor: pointer;" />
+              <span style="font-size: 11px; color: #888;">Quiet Room</span>
+            </div>
+            <small style="display: block; margin-top: 4px; color: #999; font-size: 11px;">
+              Move toward "Noisy Room" if it takes too long to stop or won't trigger automatically.
+            </small>
+          </div>
           <div style="background: #2a2a2a; padding: 12px; border-radius: 6px; margin-top: 12px;">
             <strong style="color: #4CAF50;">💡 Tip for Testing:</strong>
             <div style="margin-top: 8px; font-size: 13px; color: #ccc; line-height: 1.5;">
@@ -3267,6 +3289,16 @@
       const whisperModel = document.getElementById('whisper-model');
       if (whisperModel) {
         this.config.settings.whisperModel = whisperModel.value;
+      }
+
+      const silenceThreshold = document.getElementById('voice-silence-threshold');
+      if (silenceThreshold) {
+        this.config.settings.voiceSilenceThreshold = parseInt(silenceThreshold.value) || 250;
+      }
+
+      const voiceSensitivity = document.getElementById('voice-sensitivity');
+      if (voiceSensitivity) {
+        this.config.settings.voiceSensitivity = parseInt(voiceSensitivity.value) || -52;
       }
 
       await this.saveConfig();
