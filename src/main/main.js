@@ -12,6 +12,7 @@ const securityMonitor = require('./security-monitor');
 const ghostTyper = require('./ghost-typer');
 const windowManagerService = require('./window-manager-service');
 const appDiscoveryService = require('./app-discovery-service');
+const autoUpdaterModule = require('./auto-updater');
 
 // Security: Disable remote module
 app.allowRendererProcessReuse = true;
@@ -196,6 +197,9 @@ function createWindow() {
   ipcHandlers.registerHandlers(mainWindow, () => sessionKey, (key) => {
     sessionKey = key;
   });
+
+  // Initialize auto-updater
+  autoUpdaterModule.initialize(mainWindow);
 
   // Setup hide/show with position saving
   const hideWindow = () => {
