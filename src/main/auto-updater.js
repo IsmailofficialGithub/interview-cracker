@@ -66,25 +66,44 @@ function initialize(window) {
 
   // IPC Handlers
   ipcMain.handle('check-for-updates', async () => {
-    console.log('[AutoUpdater] Manual check requested');
+    console.log('[AutoUpdater] IPC check-for-updates triggered');
     try {
       if (!app.isPackaged) {
-          // Mock response for development
+          console.log('[AutoUpdater] Development mode: skipping native check');
           return { success: true, message: 'Updates check skipped in development mode' };
       }
+      
+      console.log('[AutoUpdater] Running native checkForUpdates()...');
       const result = await autoUpdater.checkForUpdates();
-      return { success: true, updateInfo: result.updateInfo };
+      console.log('[AutoUpdater] Native check complete. Version found:', result?.updateInfo?.version || 'None');
+      
+      return { success: true, updateInfo: result ? result.updateInfo : null };
     } catch (error) {
+      console.error('[AutoUpdater] Native check failed:', error);
       return { success: false, error: error.message };
     }
   });
 
   ipcMain.handle('start-update-download', async () => {
-    console.log('[AutoUpdater] Start download requested');
+    console.log('[AutoUpdater] IPC start-update-download triggered');
     try {
-      await autoUpdater.downloadUpdate();
+      if (!app.isPackaged) {
+          console.log('[AutoUpdater] Development mode: mocking download success');
+          // In dev mode, we just simulate the event that the renderer expects
+          setTimeout(() => {
+            mainWindow.webContents.send('update-download-progress', { percent: 50, transferred: 50, total: 100 });
+          }, 500);
+          setTimeout(() => {
+            mainWindow.webContents.send('update-downloaded');
+          }, 1500);
+          return { success: true };
+      }
+      
+      console.log('[AutoUpdater] Starting downloadUpdate()...');
+      const result = await autoUpdater.downloadUpdate();
       return { success: true };
     } catch (error) {
+      console.error('[AutoUpdater] Download failed:', error);
       return { success: false, error: error.message };
     }
   });
