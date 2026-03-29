@@ -452,6 +452,164 @@ async function loadConfig() {
 }
 
 /**
+ * Prepare GitHub context for a user message
+ * @param {string} userQuery - The user message
+ * @param {Object} chatUI - The ChatUI instance
+ * @returns {Promise<string|null>} - Formatted context snippet
+ */
+async function prepareGithubContext(userQuery, chatUI) {
+  if (!chatUI || !chatUI.includeGithub || !chatUI.githubUrl || !chatUI.githubTree) return null;
+  
+  const githubService = chatUI.githubService;
+  if (!githubService) return null;
+
+  try {
+    // Stage 1: Fuzzy search (typos/keywords)
+    let candidates = [];
+    if (chatUI.githubTree.type === 'repos') {
+      // It's a profile, candidates are repository objects
+      const repoNames = chatUI.githubTree.data.map(r => r.name);
+      candidates = githubService.fuzzySearch(repoNames, userQuery);
+    } else {
+      // It's a tree, candidates are file paths
+      candidates = githubService.fuzzySearch(chatUI.githubTree.data, userQuery);
+    }
+
+    if (!candidates || candidates.length === 0) return null;
+
+    // UI Feedback: Show search status
+    const transcriptEl = document.getElementById('voice-transcript');
+    if (transcriptEl) {
+      transcriptEl.textContent = chatUI.githubTree.type === 'repos' ? '🔍 Finding matching repo...' : '🔍 Searching GitHub repo...';
+      document.getElementById('voice-status').style.display = 'flex';
+    }
+
+    // Stage 2: LLM Router (Semantic selection)
+    const providerManager = window.aiProviderManager;
+    const activeProviderId = window.currentProviderId;
+    if (!providerManager || !activeProviderId) return null;
+
+    let routerPrompt = '';
+    if (chatUI.githubTree.type === 'repos') {
+      routerPrompt = `You are a repository router. Given a list of repositories and a user query, identify the SINGLE most relevant repository for the query.
+Query: "${userQuery}"
+Repos:
+${candidates.map((p, i) => `${i+1}. ${p}`).join('\n')}
+Respond with ONLY the name of the most relevant repo or "NONE".`;
+    } else {
+      routerPrompt = `You are a code search router. Given a list of file paths and a user query, identify the SINGLE most relevant file.
+Query: "${userQuery}"
+Paths:
+${candidates.map((p, i) => `${i+1}. ${p}`).join('\n')}
+Respond with ONLY the path or "NONE".`;
+    }
+
+    const routerMessages = [
+      { role: 'system', content: 'You are a precise router. Return only the name/path or "NONE".' },
+      { role: 'user', content: routerPrompt }
+    ];
+
+    let selection = '';
+    await providerManager.streamMessage(activeProviderId, routerMessages, {}, (chunk) => {
+      selection += chunk;
+    });
+
+    selection = selection.trim().replace(/^[`"']+|[`"']+$/g, '');
+    
+    if (selection === 'NONE' || !candidates.includes(selection)) return null;
+
+    // Step 2.5: If it was a profile/repo selection, now we need to fetch that repo's tree
+    let targetPath = selection;
+    let targetRepoUrl = chatUI.githubUrl;
+
+    if (chatUI.githubTree.type === 'repos') {
+      const repoName = selection;
+      targetRepoUrl = `https://github.com/${chatUI.githubTree.owner}/${repoName}`;
+      if (transcriptEl) transcriptEl.textContent = `🔍 Searching in ${repoName}...`;
+      
+      const repoTree = await githubService.fetchFileTree(targetRepoUrl);
+      if (!repoTree || repoTree.type !== 'tree') return null;
+      
+      // Now run fuzzy search on the files of this picked repo
+      const fileCandidates = githubService.fuzzySearch(repoTree.data, userQuery);
+      if (!fileCandidates || fileCandidates.length === 0) return null;
+
+      const fileRouterPrompt = `Identify the most relevant file in ${repoName} for: "${userQuery}".
+Paths:
+${fileCandidates.slice(0, 10).map((p, i) => `${i+1}. ${p}`).join('\n')}
+Respond with ONLY the path or "NONE".`;
+
+      let filePath = '';
+      await providerManager.streamMessage(activeProviderId, [
+        { role: 'system', content: 'Return only a file path.' },
+        { role: 'user', content: fileRouterPrompt }
+      ], {}, (chunk) => filePath += chunk);
+      
+      targetPath = filePath.trim().replace(/^[`"']+|[`"']+$/g, '');
+      if (targetPath === 'NONE' || !fileCandidates.includes(targetPath)) return null;
+    }
+
+    // Stage 3: Fetch file content and snip
+    if (transcriptEl) transcriptEl.textContent = `📂 Reading: ${targetPath}`;
+
+    let code = await githubService.fetchFileContent(targetRepoUrl, targetPath);
+    if (!code) return null;
+
+    // Advanced Snipping: Try to find function or keyword area
+    const lines = code.split('\n');
+    let startLine = 0;
+    
+    // Simple heuristic: look for "function", "const", "class" or query keywords
+    const lowerQuery = userQuery.toLowerCase();
+    const searchTerms = lowerQuery.split(/\s+/).filter(t => t.length > 3);
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].toLowerCase();
+      if (searchTerms.some(term => line.includes(term)) || (line.includes('function') || line.includes('const') || line.includes('class'))) {
+        startLine = Math.max(0, i - 10);
+        break;
+      }
+    }
+
+    const snip = lines.slice(startLine, startLine + 150).join('\n');
+    
+    return `
+[GITHUB CONTEXT]
+Repo: ${targetRepoUrl}
+File: ${targetPath}
+${startLine > 0 ? `(Starting at line ${startLine + 1})` : ''}
+Content Snippet:
+\`\`\`
+${snip}
+${lines.length > startLine + 150 ? '\n... [truncated] ...' : ''}
+\`\`\`
+`;
+
+    // Store in metadata for logs/debug
+    console.log(`✅ GitHub Context found in ${selectedPath}`);
+    
+    return `
+[GITHUB REPOSITORY CONTEXT]
+File: ${selectedPath}
+Content:
+\`\`\`
+${snip}
+\`\`\`
+`;
+  } catch (error) {
+    console.error('Failed to prepare GitHub context:', error);
+    return null;
+  } finally {
+    // Hide search status (will be replaced by AI response soon)
+    if (document.getElementById('voice-transcript')) {
+      setTimeout(() => {
+        document.getElementById('voice-status').style.display = 'none';
+      }, 1000);
+    }
+  }
+}
+
+/**
  * Send message to AI
  * Note: This function is mainly for voice assistant integration
  * The main chat UI in renderer-bundle.js handles regular message sending
@@ -477,6 +635,9 @@ async function sendAIMessage(messageContent) {
     content: messageContent
   });
 
+  // 1. Prepare GitHub Context (NEW)
+  const githubSnippet = await prepareGithubContext(messageContent, activeChatUI);
+
   // Get chat context if available
   const chatContext = (activeChatUI && typeof activeChatUI.getContext === 'function')
     ? activeChatUI.getContext()
@@ -484,8 +645,8 @@ async function sendAIMessage(messageContent) {
 
   // Build messages with system prompt and context
   let systemPrompt = 'You are a helpful AI assistant. Provide clear, accurate responses.';
-  if (chatContext) {
-    systemPrompt = `Context: ${chatContext}. ${systemPrompt}`;
+  if (chatContext || githubSnippet) {
+    systemPrompt = `${systemPrompt}\n\nContext Information:\n${chatContext ? `User Global Context: ${chatContext}\n` : ''}${githubSnippet ? `Current GitHub Repository Selection: ${githubSnippet}\n` : ''}`;
   }
 
   // Include context in user message for better awareness

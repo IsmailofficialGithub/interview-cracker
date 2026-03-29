@@ -25,6 +25,10 @@
       this.messages = [];
       this.currentChatId = 'default';
       this.context = null; // Optional context/description for the chat
+      this.githubUrl = null; // GitHub repository URL
+      this.includeGithub = false; // Whether to use GitHub context
+      this.githubTree = null; // Cached file tree for the repository
+      this.githubService = typeof GithubService !== 'undefined' ? new GithubService() : null;
       this.autoSaveTimer = null;
       this.isBlurred = false;
 
@@ -2015,6 +2019,25 @@
         this.autoScroll();
       }
     }
+
+    /**
+     * Handle incoming AI stream chunk
+     * @param {string} chunk - AI message chunk
+     */
+    handleAIChunk(chunk) {
+      if (chunk === '[DONE]') {
+        this.scheduleAutoSave();
+        return;
+      }
+      
+      if (typeof chunk === 'string' && chunk.startsWith('[ERROR]')) {
+        this.addMessage('assistant', `I'm sorry, I encountered an error: ${chunk.substring(7)}`);
+        return;
+      }
+
+      this.currentAssistantMessage += chunk;
+      this.updateLastAssistantMessage(this.currentAssistantMessage);
+    }
     
     scrollToBottom() {
       // Force scroll to bottom (used when user sends message)
@@ -2179,18 +2202,219 @@
       }
     }
 
+    /**
+     * Send message to AI
+     */
     async sendMessage() {
+      if (!this.inputArea) return;
       const content = this.inputArea.value.trim();
       if (!content) return;
 
+      if (window.logsPanel) window.logsPanel.addLog('info', `Sending message: "${content.substring(0, 30)}..."`, null, { source: 'Chat', action: 'send_message' });
+
+      // Find provider config (crucial for IPC)
+      const activeProviderId = window.currentProviderId || currentProviderId;
+      const providerConfig = config && config.accounts ? config.accounts.find(acc => acc.name === activeProviderId) : null;
+
+      if (!providerConfig) {
+        if (window.logsPanel) window.logsPanel.addLog('error', 'No AI provider selected or configured', null, { source: 'Chat', action: 'send_error' });
+        this.addMessage('assistant', 'Error: No AI provider selected or configured.');
+        return;
+      }
+
+      // Clear input and focus
       this.inputArea.value = '';
       this.inputArea.style.height = 'auto';
+      this.inputArea.blur();
 
+      // Clear current assistant message if any
+      this.currentAssistantMessage = '';
+
+      // Add user message to UI
       this.addMessage('user', content);
 
-      window.dispatchEvent(new CustomEvent('chat-send-message', {
-        detail: { content }
-      }));
+      try {
+        // UI Feedback: Show search status if GitHub is enabled
+        let githubContextSnippet = null;
+        
+        // FORCE ENABLE IF URL IS PRESENT
+        const effectiveIncludeGithub = this.includeGithub || !!this.githubUrl;
+        
+        if (effectiveIncludeGithub && this.githubUrl) {
+          if (!this.githubTree) {
+             if (window.logsPanel) window.logsPanel.addLog('info', `GitHub: Context is ON, but map is still loading for "${this.githubUrl}"`, null, { source: 'Chat' });
+          } else {
+             if (window.logsPanel) window.logsPanel.addLog('info', `GitHub: Activating brain context for "${this.githubUrl}"`, null, { source: 'Chat', action: 'github_prepare' });
+             githubContextSnippet = await this.prepareGithubContext(content);
+          }
+        }
+
+        const messages = this.messages
+          .filter(m => m.role !== 'assistant' || m.content !== 'Thinking...') // Safety filter
+          .map(m => ({ role: m.role, content: m.content }));
+        
+        // Build system prompt with context
+        const chatContext = this.getContext();
+        let systemPrompt = 'You are a powerful AI coding assistant with DIRECT access to the user\'s project files through the context blocks provided below. \n' +
+                           'GUIDELINES:\n' +
+                           '1. DO NOT tell the user you "will look" or "need a moment" or "need to fetch".\n' +
+                           '2. The data provided in the prompt is ALREAY fetched and is the REAL content of the repository.\n' +
+                           '3. Answer ALL questions immediately using the provided snippets.\n' +
+                           '4. If no specific snippets are provided but you have the repository status, use your general knowledge of similar projects to guess, but admit you haven\'t read the specific file yet and ask the user for a filename.';
+        
+        // Add Chat Context
+        if (chatContext) {
+          systemPrompt += '\n\nGlobal Context for this Chat:\n' + chatContext;
+        }
+        
+        // Always include GitHub URL if enabled so AI "remembers" it
+        if (effectiveIncludeGithub && this.githubUrl) {
+          systemPrompt += '\n\n【REAL-TIME GITHUB REPOSITORY ACCESS】\n' + 
+                         `Target Repository: ${this.githubUrl}\n` + 
+                         (this.githubTree ? `Access Status: Connection Established. Repository Map Loaded.\n` : 'Access Status: Connection is slow, map is still being indexed.\n');
+          
+          if (githubContextSnippet) {
+            systemPrompt += `\nCRITICAL FILE CONTENT (FETCHED BY SYSTEM):\n${githubContextSnippet}\n`;
+            systemPrompt += `\nINSTRUCTION: The content above was PULLED from the repository specifically for your current question. Answer directly with these facts. DO NOT apologize or say you cannot see files.\n`;
+          } else {
+            systemPrompt += `\nWARNING: No specific files matched your query keywords. However, you can see the file list by asking the user to provide a filename.\n`;
+          }
+        }
+        
+        if (window.logsPanel) {
+          window.logsPanel.addLog('info', `Internal Prompt updated with GitHub status: ${effectiveIncludeGithub ? 'ACTIVE (FORCED)' : 'OFF'}`, null, { source: 'Chat' });
+        }
+        
+        messages.unshift({ role: 'system', content: systemPrompt });
+
+        // Call streaming send API with FULL providerConfig object
+        this.addMessage('assistant', 'Thinking...');
+        const loadingIndex = this.messages.length - 1;
+
+        if (window.logsPanel) window.logsPanel.addLog('info', `Streaming AI message to account "${providerConfig.name}"`, null, { source: 'Chat', action: 'ai_stream_start' });
+
+        await window.electronAPI.sendAIMessageStream(providerConfig, messages, this.currentChatId || 'default', (chunk) => {
+          if (this.messages[loadingIndex].content === 'Thinking...') {
+            this.messages[loadingIndex].content = '';
+          }
+          this.handleAIChunk(chunk);
+        });
+
+        if (window.logsPanel) window.logsPanel.addLog('success', 'AI request acknowledged by provider. Streaming...', null, { source: 'Chat', action: 'ai_stream_done' });
+
+      } catch (error) {
+        console.error('Failed to send message:', error);
+        if (window.logsPanel) window.logsPanel.addLog('error', `AI Error: ${error.message}`, error.stack, { source: 'Chat', action: 'ai_error' });
+        this.addMessage('assistant', `I'm sorry, I encountered an error: ${error.message}. Please try again.`);
+      }
+    }
+
+    /**
+     * Prepare GitHub context for a query
+     */
+    async prepareGithubContext(query) {
+      if (!this.githubService || !this.githubTree) return null;
+      
+      try {
+        const activeProviderId = window.currentProviderId || currentProviderId;
+        const providerConfig = config && config.accounts ? config.accounts.find(acc => acc.name === activeProviderId) : null;
+        if (!providerConfig) return null;
+
+        const transcriptEl = document.getElementById('voice-transcript');
+        const statusEl = document.getElementById('voice-status');
+        if (statusEl) {
+          if (transcriptEl) transcriptEl.textContent = '🔍 Identifying relevant code...';
+          statusEl.style.display = 'flex';
+        }
+
+        // Logic similar to what we wrote in renderer.js
+        let candidates = [];
+        if (this.githubTree.type === 'repos') {
+          candidates = this.githubService.fuzzySearch(this.githubTree.data.map(r => r.name), query);
+        } else {
+          candidates = this.githubService.fuzzySearch(this.githubTree.data, query);
+        }
+
+        if (!candidates.length) {
+          if (this.githubTree.type === 'tree') {
+            return `I couldn't find a specific file for your query, but here are the top files in this repository:\n${this.githubTree.data.slice(0, 15).join('\n')}\n\nPlease ask about a specific file if you need more details.`;
+          }
+          return `I couldn't find a specific repository among your projects, but you have ${this.githubTree.data.length} repositories available.`;
+        }
+        
+        // RULE-BASED ROUTING (Saves time and API costs)
+        const lowerQuery = query.toLowerCase();
+        if (lowerQuery.includes('package') || lowerQuery.includes('depen')) {
+          selection = candidates.find(c => c.toLowerCase().endsWith('package.json'));
+          if (selection && window.logsPanel) window.logsPanel.addLog('info', `GitHub: Auto-selected ${selection} for dependency query`, null, { source: 'Chat' });
+        } else if (lowerQuery.includes('readme') || lowerQuery.includes('about') || lowerQuery.includes('what') || lowerQuery.includes('repo')) {
+          selection = candidates.find(c => c.toLowerCase().endsWith('readme.md') || c.toLowerCase().endsWith('readme.txt'));
+          if (selection && window.logsPanel) window.logsPanel.addLog('info', `GitHub: Auto-selected ${selection} for repo info query`, null, { source: 'Chat' });
+        }
+
+        let selection = '';
+        
+        // Bias towards README if query is generic
+        if (query.length < 10 || query.toLowerCase().includes('about') || query.toLowerCase().includes('what') || query.toLowerCase().includes('repo')) {
+          const readme = candidates.find(c => c.toLowerCase().includes('readme.md'));
+          if (readme) {
+            selection = readme;
+            if (window.logsPanel) window.logsPanel.addLog('info', `GitHub: Selecting README.md as default for generic query`, null, { source: 'Chat' });
+          }
+        }
+
+        if (!selection) {
+          let routerPrompt = `Identify the most relevant file for: "${query}". Candidates:\n${candidates.slice(0, 50).join('\n')}\nReturn ONLY the exact path from the list or "NONE".`;
+          let routerResult = '';
+          await window.electronAPI.sendAIMessageStream(providerConfig, [{role:'system', content:'You are a file router. Respond with ONLY the path.'}, {role:'user', content:routerPrompt}], null, (c) => routerResult += c);
+          selection = routerResult.trim().replace(/^[`"']+|[`"']+$/g, '').split('\n')[0].trim();
+        }
+        
+        // Robust match
+        const bestMatch = candidates.find(c => c === selection || c.endsWith('/' + selection) || selection.endsWith('/' + c));
+        if (selection === 'NONE' || !bestMatch) {
+           if (window.logsPanel) window.logsPanel.addLog('warn', `GitHub: Could not pinpoint specific file (Got: "${selection}"), using repo-level context instead.`, null, { source: 'Chat' });
+           // Return top files as context
+           return `No specific file pinpointed. Top project files:\n${candidates.slice(0, 15).join('\n')}`;
+        }
+        selection = bestMatch;
+
+        let targetUrl = this.githubUrl;
+        let targetPath = selection;
+
+        if (this.githubTree.type === 'repos') {
+           targetUrl = `https://github.com/${this.githubTree.owner}/${selection}`;
+           if (transcriptEl) transcriptEl.textContent = `🔍 Searching ${selection}...`;
+           const subTree = await this.githubService.fetchFileTree(targetUrl);
+           if (!subTree || subTree.type !== 'tree') return null;
+           const fileCand = this.githubService.fuzzySearch(subTree.data, query);
+           if (!fileCand.length) return null;
+           
+           let filePath = '';
+           await window.electronAPI.sendAIMessageStream(providerConfig, [{role:'user', content:`Pick one file from ${selection} for "${query}":\n${fileCand.slice(0,5).join('\n')}`}], null, (c) => filePath += c);
+           targetPath = filePath.trim().replace(/^[`"']+|[`"']+$/g, '');
+        }
+
+        if (transcriptEl) transcriptEl.textContent = `📂 Reading ${targetPath}`;
+        const code = await this.githubService.fetchFileContent(targetUrl, targetPath);
+        if (!code) return null;
+
+        const lines = code.split('\n');
+        let start = 0;
+        for(let i=0; i<lines.length; i++) {
+          if (lines[i].toLowerCase().includes('function') || lines[i].toLowerCase().includes('const') || lines[i].toLowerCase().includes('class')) {
+            start = Math.max(0, i-5); break;
+          }
+        }
+        
+        if (statusEl) statusEl.style.display = 'none';
+        
+        return `[FILE: ${targetPath}] [URL: ${targetUrl}]\n\`\`\`\n${lines.slice(start, start+150).join('\n')}\n\`\`\``;
+      } catch (e) { 
+        console.error('GitHub Context Error:', e); 
+        if (window.logsPanel) window.logsPanel.addLog('error', `GitHub Context Error: ${e.message}`, e.stack, { source: 'Chat' });
+        return null; 
+      }
     }
 
     async loadChatHistory() {
@@ -2249,7 +2473,10 @@
         // Save with context if available
         const chatData = {
           messages: this.messages,
-          context: this.context || null
+          context: this.context || null,
+          githubUrl: this.githubUrl || null,
+          includeGithub: this.includeGithub || false,
+          githubTree: this.githubTree || null
         };
         await window.electronAPI.saveChat(this.currentChatId, chatData);
       } catch (error) {
@@ -2281,32 +2508,90 @@
      * Switch to a different chat
      * @param {string} chatId - Chat ID
      * @param {string|null} context - Optional context
+     * @param {object|null} github - Optional github config
      */
-    async switchChat(chatId, context = null) {
+    async switchChat(chatId, context = null, github = null) {
+      if (window.logsPanel) window.logsPanel.addLog('info', `Switching to chat: "${chatId}"`, null, { source: 'Chat', action: 'switch_chat' });
       this.currentChatId = chatId;
 
       // Try to load existing chat
       try {
-        await this.loadChatHistory();
+        const result = await window.electronAPI.getChat(chatId);
+        if (result.success && result.data) {
+          const chatData = result.data;
+          
+          if (Array.isArray(chatData)) {
+            // Old format
+            this.messages = chatData;
+            this.context = null;
+            this.githubUrl = null;
+            this.includeGithub = false;
+            this.githubTree = null;
+          } else {
+            // New format
+            this.messages = chatData.messages || [];
+            this.context = chatData.context || null;
+            this.githubUrl = chatData.githubUrl || null;
+            this.includeGithub = chatData.includeGithub || false;
+            this.githubTree = chatData.githubTree || null;
+
+            // SAFETY: If we have a URL but includeGithub is false, the user likely wanted it on
+            if (this.githubUrl && !this.includeGithub) {
+               this.includeGithub = true;
+               if (window.logsPanel) window.logsPanel.addLog('info', 'GitHub: Auto-enabling context because URL is present.', null, { source: 'Chat' });
+            }
+
+            // AUTO-FETCH GITHUB TREE IF MISSING
+            if (this.includeGithub && this.githubUrl && !this.githubTree) {
+              if (window.logsPanel) window.logsPanel.addLog('info', `GitHub: Auto-fetching repository map for "${this.githubUrl}"`, null, { source: 'Chat', action: 'github_autofetch' });
+              
+              // Don't await this to keep UI responsive
+              this.githubService.fetchFileTree(this.githubUrl).then(tree => {
+                if (tree) {
+                  this.githubTree = tree;
+                  this.saveChatHistory(); // Cache the tree to disk
+                  if (window.logsPanel) window.logsPanel.addLog('success', `GitHub: Repository map loaded (${tree.type === 'repos' ? tree.data.length + ' repos' : tree.data.length + ' files'})`, null, { source: 'Chat', action: 'github_ready' });
+                } else {
+                  if (window.logsPanel) window.logsPanel.addLog('error', 'GitHub: Failed to fetch repository map. Is it private or rate-limited?', null, { source: 'Chat', action: 'github_error' });
+                }
+              }).catch(err => {
+                console.error('GitHub Fetch Error:', err);
+              });
+            }
+          }
+          if (window.logsPanel) window.logsPanel.addLog('success', `Loaded ${this.messages.length} messages for chat "${chatId}"`, null, { source: 'Chat' });
+        } else {
+          if (window.logsPanel) window.logsPanel.addLog('warn', `No data found for chat "${chatId}", starting fresh`, null, { source: 'Chat', result });
+          this.messages = [];
+          this.context = null;
+          this.githubUrl = null;
+          this.includeGithub = false;
+          this.githubTree = null;
+        }
       } catch (error) {
-        // Chat might not exist yet, that's fine
-        console.log('Chat load failed (likely new):', error);
+        console.error('Chat load failed:', error);
+        if (window.logsPanel) window.logsPanel.addLog('error', `Failed to load chat data: ${error.message}`, error.stack, { source: 'Chat' });
         this.messages = [];
         this.context = null;
+        this.githubUrl = null;
+        this.includeGithub = false;
+        this.githubTree = null;
       }
 
-      // If context is explicitly provided (e.g. New Chat), override whatever was loaded
-      if (context !== null) {
-        this.context = context;
-        // Save immediately to ensure file exists and context is persisted
-        await this.saveChatHistory();
+      // Explicit overrides (like from New Chat modal)
+      if (context !== null) this.context = context;
+      if (github) {
+        this.githubUrl = github.githubUrl || null;
+        this.includeGithub = github.includeGithub || false;
+        if (github.githubTree) this.githubTree = github.githubTree;
       }
 
       this.rerenderMessages();
+      this.autoScroll();
 
-      // Update the sidebar list to show the new/active chat
+      // Refresh sidebar highlight if it exists
       if (typeof loadChatsList === 'function') {
-        loadChatsList();
+        loadChatsList().catch(e => console.warn('loadChatsList update failed:', e));
       }
     }
 
@@ -4292,7 +4577,41 @@
     }
   }
 
-  // Redundant functions removed
+  // Chat Management Functions
+  async function loadChat(chatId) {
+    if (window.logsPanel) window.logsPanel.addLog('info', `Sidebar: Loading chat "${chatId}"`, null, { source: 'Sidebar', action: 'load_chat' });
+    if (chatUI && typeof chatUI.switchChat === 'function') {
+      await chatUI.switchChat(chatId);
+    } else {
+      console.error('chatUI.switchChat not available');
+    }
+  }
+
+  async function createNewChat() {
+    if (window.logsPanel) window.logsPanel.addLog('info', 'UI: New Chat button clicked', null, { source: 'UI', action: 'create_new_chat' });
+    if (typeof window.showNewChatModal === 'function') {
+      window.showNewChatModal();
+    }
+  }
+
+  async function deleteChat(chatId) {
+    try {
+      if (window.logsPanel) window.logsPanel.addLog('info', `Sidebar: deleting chat "${chatId}"`, null, { source: 'Sidebar' });
+      const result = await window.electronAPI.deleteChat(chatId);
+      if (result.success) {
+        if (chatUI.currentChatId === chatId) {
+          await chatUI.switchChat('default');
+        } else {
+          await loadChatsList();
+        }
+      } else {
+        alert('Failed to delete chat: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Delete chat failed:', error);
+      alert('Error deleting chat: ' + error.message);
+    }
+  }
 
   function escapeHtml(text) {
     const div = document.createElement('div');
@@ -4361,9 +4680,9 @@
             // Load the chat first to get its context
             await loadChat(chatId);
 
-            // Now chatUI.context should be set
+            // Now chatUI state should be set
             if (typeof window.showNewChatModal === 'function') {
-              window.showNewChatModal(chatId, currentName, chatUI.context);
+              window.showNewChatModal(chatId, currentName, chatUI.context, chatUI.githubUrl, chatUI.includeGithub);
             }
           });
         });
@@ -4384,6 +4703,49 @@
     } catch (error) {
       console.error('Failed to load chats list:', error);
       chatsList.innerHTML = '<div class="chats-empty">Error loading chats.</div>';
+    }
+  }
+
+  async function loadChat(chatId) {
+    if (chatUI && typeof chatUI.switchChat === 'function') {
+      await chatUI.switchChat(chatId);
+      
+      // Close sidebar on mobile
+      const chatsSidebar = document.getElementById('chats-sidebar');
+      if (chatsSidebar && window.innerWidth <= 768) {
+        chatsSidebar.style.display = 'none';
+        document.body.classList.remove('sidebar-open');
+      }
+    }
+  }
+
+  async function deleteChat(chatId) {
+    try {
+      const result = await window.electronAPI.deleteChat(chatId);
+      if (result.success) {
+        if (chatUI.currentChatId === chatId) {
+          await loadChat('default');
+        }
+        await loadChatsList();
+      } else {
+        alert('Failed to delete chat: ' + (result.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+      alert('Error deleting chat: ' + error.message);
+    }
+  }
+
+  async function createNewChat() {
+    if (typeof window.showNewChatModal === 'function') {
+      window.showNewChatModal();
+    } else {
+      // Fallback: create default chat
+      const chatId = 'chat_' + Date.now();
+      if (chatUI && typeof chatUI.switchChat === 'function') {
+        await chatUI.switchChat(chatId);
+        await loadChatsList();
+      }
     }
   }
 

@@ -571,16 +571,15 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       }
 
       // DEBUG: Log full providerConfig received
-      securityMonitor.logInfo(`[DEBUG] Received providerConfig:`, {
-        name: providerConfig.name,
-        type: providerConfig.type,
-        model: providerConfig.model,
-        hasApiKey: !!providerConfig.apiKey,
-        apiKeyLength: providerConfig.apiKey ? providerConfig.apiKey.length : 0,
-        apiKeyPreview: providerConfig.apiKey ? providerConfig.apiKey.substring(0, 10) + '...' : 'none',
-        hasBaseURL: !!providerConfig.baseURL,
-        baseURL: providerConfig.baseURL || 'none'
-      });
+      securityMonitor.logInfo(`[DEBUG] Received providerConfig for "${providerConfig.name}"`);
+      
+      // DEBUG: Log messages summary
+      securityMonitor.logInfo(`[DEBUG] Messages count: ${messages ? messages.length : 0}`);
+      if (messages && messages.length > 0) {
+        messages.forEach((m, idx) => {
+          securityMonitor.logInfo(`[DEBUG] Message ${idx} [${m.role}]: ${m.content ? m.content.substring(0, 50) + '...' : 'empty'}`);
+        });
+      }
 
       // Load provider modules
       const OpenAIProvider = require('../providers/openai');
