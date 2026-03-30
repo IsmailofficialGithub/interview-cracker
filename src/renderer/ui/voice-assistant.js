@@ -429,20 +429,44 @@ class VoiceAssistant {
     if (this.isActive) {
       const iconName = this.mode === 'mine' ? 'mic' : 'volume-2';
       this.statusIndicator.className = 'voice-assistant-status active';
-      this.statusIndicator.innerHTML = `
+      
+      // Select appropriate status text
+      let statusText = 'Listening...';
+      if (this.isProcessing) {
+        statusText = this.responseBuffer ? 'Responding...' : 'Thinking...';
+      }
+
+      let content = `
         <div class="status-mode">
           <i data-feather="${iconName}" class="icon icon-small"></i> ${this.mode === 'mine' ? 'MINE MODE' : 'YOURS MODE'}
         </div>
-        <div class="status-text">${this.isProcessing ? 'Processing...' : 'Listening...'}</div>
-        ${this.lastTranscription ? `<div class="status-transcript">${this.lastTranscription}</div>` : ''}
+        <div class="status-text">${statusText}</div>
       `;
+
+      // Show AI response if available, otherwise show transcription
+      if (this.responseBuffer) {
+        content += `<div class="status-response">${this.responseBuffer}</div>`;
+      } else if (this.lastTranscription) {
+        content += `<div class="status-transcript">${this.lastTranscription}</div>`;
+      }
+
+      this.statusIndicator.innerHTML = content;
+      
       // Re-initialize icons
       if (typeof feather !== 'undefined') {
         feather.replace();
       }
+
+      // Ensure transcript/response scrolls to bottom
+      const transcript = this.statusIndicator.querySelector('.status-transcript');
+      if (transcript) transcript.scrollTop = transcript.scrollHeight;
+      const response = this.statusIndicator.querySelector('.status-response');
+      if (response) response.scrollTop = response.scrollHeight;
+
     } else {
       this.statusIndicator.className = 'voice-assistant-status';
       this.statusIndicator.innerHTML = '';
+      this.responseBuffer = ''; // Clear buffer when stopped
     }
   }
 
@@ -1139,6 +1163,10 @@ class VoiceAssistant {
    */
   async generateResponse(userText) {
     console.log('generateResponse called with text:', userText);
+    this.isProcessing = true;
+    this.responseBuffer = ''; // Reset buffer for new response
+    this.updateStatus();
+    
     try {
       // Reload config to ensure we have the latest keys/settings
       await this.loadConfig();
@@ -1338,15 +1366,18 @@ class VoiceAssistant {
             this.responseBuffer += chunk;
             console.log('Received chunk, buffer length:', this.responseBuffer.length);
 
-            // Update UI immediately on each chunk for low latency
+            // Update status overlay immediately
+            this.updateStatus();
+
+            // Update UI callback (tells ChatUI to update its message view)
             if (this.onResponse) {
               this.onResponse(this.responseBuffer, false);
             }
           }
         );
 
-        // Final response
-        console.log('Stream complete, final buffer length:', this.responseBuffer.length);
+        // Final response handling
+        console.log('Stream complete, final buffer length:', this.responseBuffer ? this.responseBuffer.length : 0);
         if (this.responseBuffer && this.responseBuffer.trim()) {
           if (this.onResponse) {
             this.onResponse(this.responseBuffer, true);
@@ -1368,6 +1399,9 @@ class VoiceAssistant {
       if (this.chatUI && typeof this.chatUI.addMessage === 'function') {
         this.chatUI.addMessage('assistant', `[Error: ${error.message}]`);
       }
+    } finally {
+      this.isProcessing = false;
+      this.updateStatus();
     }
   }
 
