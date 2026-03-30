@@ -4982,6 +4982,8 @@
       const webview = document.createElement('webview');
       webview.id = `webview-${tabId}`;
       webview.src = url;
+      // Set User-Agent to a modern Chrome version to avoid "Browser Outdated" errors (e.g., WhatsApp Web)
+      webview.useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
       webview.style.cssText = 'flex: 1; width: 100%; height: 100%; background: white; border: none; min-height: 0;';
 
       // Set partition for incognito (use temporary partition for true incognito)

@@ -1278,6 +1278,8 @@ function registerHandlers(mainWindow, getSessionKey, setSessionKey) {
       const webview = document.createElement('webview');
       webview.id = tabId;
       webview.src = url;
+      // Set User-Agent to a modern Chrome version to avoid "Browser Outdated" errors (e.g., WhatsApp Web)
+      webview.useragent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
       webview.setAttribute('allowpopups', '');
       webview.setAttribute('disablewebsecurity', ''); 
       // Note: setContentProtection on parent window covers this webview
