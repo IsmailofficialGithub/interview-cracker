@@ -147,8 +147,15 @@ class UpdateManager {
 
       try {
         // MUST check natively first so electron-updater knows what to download
-        await window.electronAPI.checkForUpdates();
-        await window.electronAPI.startUpdateDownload();
+        const checkResult = await window.electronAPI.checkForUpdates();
+        if (checkResult && !checkResult.success) {
+          throw new Error(checkResult.error || 'Native check failed');
+        }
+        
+        const downloadResult = await window.electronAPI.startUpdateDownload();
+        if (downloadResult && !downloadResult.success) {
+          throw new Error(downloadResult.error || 'Download failed to start');
+        }
       } catch (err) {
         this.showError(err.message);
       }
@@ -215,14 +222,29 @@ class UpdateManager {
   showError(message) {
     if (!this.modal) return;
     const container = this.modal.querySelector('#update-progress-container') || this.modal.querySelector('#update-action-container');
+    
+    // Create a more detailed error view
     container.innerHTML = `
-      <div style="background: rgba(255,59,48,0.1); color: #ff3b30; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid rgba(255,59,48,0.2);">
-        <div style="font-weight: 600; margin-bottom: 5px;">Update Failed</div>
-        <div style="font-size: 12px; opacity: 0.8;">${message}</div>
+      <div style="background: rgba(255,59,48,0.1); color: #ff3b30; padding: 15px; border-radius: 8px; text-align: left; border: 1px solid rgba(255,59,48,0.2); max-height: 200px; overflow-y: auto;">
+        <div style="font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          Update Failed
+        </div>
+        <div style="font-size: 11px; font-family: monospace; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; margin-bottom: 10px; word-break: break-all;">
+          ${message || 'Unknown error occurred during update process.'}
+        </div>
+        <div style="font-size: 10px; opacity: 0.7;">
+          Details have been saved to your local logs. Check <strong>update-error.log</strong> in your app data folder.
+        </div>
       </div>
-      <button onclick="location.reload()" style="width: 100%; background: #333; color: white; border: none; padding: 10px; border-radius: 8px; margin-top: 15px; cursor: pointer;">
-        Try Again
-      </button>
+      <div style="display: flex; gap: 10px; margin-top: 15px;">
+        <button onclick="location.reload()" style="flex: 1; background: #007aff; color: white; border: none; padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+          Retry
+        </button>
+        <button onclick="document.body.removeChild(document.getElementById('update-modal-overlay'))" style="flex: 1; background: #333; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer;">
+          Close
+        </button>
+      </div>
     `;
   }
   /**

@@ -206,6 +206,15 @@
           <small>Leave empty to use a default name</small>
         </div>
         <div class="new-chat-input-group">
+          <label for="new-chat-github-url">GitHub Repository URL (optional)</label>
+          <input type="text" id="new-chat-github-url" placeholder="https://github.com/username/repo" autocomplete="off">
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+            <input type="checkbox" id="new-chat-github-context" style="width: auto; margin: 0;">
+            <label for="new-chat-github-context" style="margin: 0; font-size: 0.9em; cursor: pointer;">Include GitHub context for search-on-demand</label>
+          </div>
+          <small>The AI will be able to search and read code from this repository.</small>
+        </div>
+        <div class="new-chat-input-group">
           <label for="new-chat-context">Context (optional)</label>
           <textarea id="new-chat-context"
             placeholder="e.g., This is my resume. Help me answer questions about my experience and skills."></textarea>
@@ -301,6 +310,8 @@
   </div>
   <!-- End Main Content Area -->
 
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+  <script src="./renderer/api/github-service.js"></script>
   <script src="./renderer/ui/voice-assistant.js"></script>
   <script src="./renderer/ui/update-manager.js"></script>
   <script>
@@ -374,6 +385,12 @@
         if (submitBtn) submitBtn.textContent = 'Save Changes';
         if (nameInput) nameInput.value = currentName || '';
         if (contextInput) contextInput.value = currentContext || '';
+
+        // Set GitHub fields
+        const githubInput = document.getElementById('new-chat-github-url');
+        const githubToggle = document.getElementById('new-chat-github-context');
+        if (githubInput) githubInput.value = arguments[3] || ''; // currentGithubUrl
+        if (githubToggle) githubToggle.checked = arguments[4] || false; // currentIncludeGithub
       } else {
         // New Chat Mode
         form.dataset.mode = 'new';
@@ -382,6 +399,11 @@
         if (submitBtn) submitBtn.textContent = 'Create Chat';
         if (nameInput) nameInput.value = '';
         if (contextInput) contextInput.value = '';
+        // Clear GitHub fields
+        const githubInput = document.getElementById('new-chat-github-url');
+        const githubToggle = document.getElementById('new-chat-github-context');
+        if (githubInput) githubInput.value = '';
+        if (githubToggle) githubToggle.checked = false;
       }
 
       modal.removeAttribute('hidden');
@@ -494,21 +516,13 @@
           // Get inputs directly from the form
           const nameInput = form.querySelector('#new-chat-name');
           const contextInput = form.querySelector('#new-chat-context');
-
-          // Ensure inputs are enabled and accessible
-          if (nameInput) {
-            nameInput.disabled = false;
-            nameInput.readOnly = false;
-            nameInput.style.pointerEvents = 'auto';
-          }
-          if (contextInput) {
-            contextInput.disabled = false;
-            contextInput.readOnly = false;
-            contextInput.style.pointerEvents = 'auto';
-          }
+          const githubInput = form.querySelector('#new-chat-github-url');
+          const githubToggle = form.querySelector('#new-chat-github-context');
 
           const chatName = nameInput ? nameInput.value.trim() : '';
           const context = contextInput ? contextInput.value.trim() : '';
+          const githubUrl = githubInput ? githubInput.value.trim() : '';
+          const includeGithub = githubToggle ? githubToggle.checked : false;
 
           const isEditMode = form.dataset.mode === 'edit';
           const editChatId = form.dataset.chatId;
@@ -516,7 +530,7 @@
           // Determine Chat ID
           const chatId = isEditMode ? editChatId : (chatName || `chat-${Date.now()}`);
 
-          console.log('Form Submit:', { isEditMode, chatId, chatName, context });
+          console.log('Form Submit:', { isEditMode, chatId, chatName, githubUrl, includeGithub });
 
           if (window.chatUI) {
             try {
@@ -524,10 +538,12 @@
                 // EDIT MODE
                 if (window.chatUI.currentChatId === chatId) {
                   window.chatUI.context = context;
+                  window.chatUI.githubUrl = githubUrl;
+                  window.chatUI.includeGithub = includeGithub;
                   await window.chatUI.saveChatHistory();
                 } else {
                   // Updating metadata for a non-active chat
-                  await window.chatUI.switchChat(chatId, context);
+                  await window.chatUI.switchChat(chatId, context, { githubUrl, includeGithub });
                 }
               } else {
                 // NEW CHAT MODE
@@ -539,7 +555,7 @@
 
                 // Create/Switch
                 if (typeof window.chatUI.switchChat === 'function') {
-                  await window.chatUI.switchChat(chatId, context || null);
+                  await window.chatUI.switchChat(chatId, context || null, { githubUrl, includeGithub });
                 } else {
                   // Fallback
                   window.chatUI.currentChatId = chatId;

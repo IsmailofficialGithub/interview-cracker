@@ -6,6 +6,10 @@
 const { autoUpdater } = require('electron-updater');
 const { ipcMain } = require('electron');
 const semver = require('semver');
+const fs = require('fs');
+const path = require('path');
+const { app } = require('electron');
+
 
 // Configure autoUpdater
 autoUpdater.autoDownload = false; // We want to show UI before downloading
@@ -23,6 +27,22 @@ let mainWindow = null;
  */
 function initialize(window) {
   mainWindow = window;
+
+  // Logging Setup
+  const logPath = path.join(app.getPath('userData'), 'update-error.log');
+  
+  function logToFile(msg, error = null) {
+    const timestamp = new Date().toISOString();
+    const errorDetails = error ? `\nStack: ${error.stack || error}` : '';
+    const logEntry = `[${timestamp}] ${msg}${errorDetails}\n\n`;
+    
+    try {
+      fs.appendFileSync(logPath, logEntry);
+      console.log(`[AutoUpdater] Logged error to: ${logPath}`);
+    } catch (e) {
+      console.error('[AutoUpdater] Failed to write to log file:', e);
+    }
+  }
 
   // Logging
   autoUpdater.logger = console;
@@ -61,7 +81,8 @@ function initialize(window) {
   // Event: Error
   autoUpdater.on('error', (err) => {
     console.error('[AutoUpdater] Error:', err);
-    mainWindow.webContents.send('update-error', err.message);
+    logToFile('General update error', err);
+    mainWindow.webContents.send('update-error', err.message || 'Unknown update error');
   });
 
   // IPC Handlers
@@ -80,6 +101,7 @@ function initialize(window) {
       return { success: true, updateInfo: result ? result.updateInfo : null };
     } catch (error) {
       console.error('[AutoUpdater] Native check failed:', error);
+      logToFile('Native check failed', error);
       return { success: false, error: error.message };
     }
   });
@@ -104,6 +126,7 @@ function initialize(window) {
       return { success: true };
     } catch (error) {
       console.error('[AutoUpdater] Download failed:', error);
+      logToFile('Download failed', error);
       return { success: false, error: error.message };
     }
   });
@@ -116,14 +139,14 @@ function initialize(window) {
   // --- Hybrid Logic (DB/Remote Version Check) ---
   
   ipcMain.handle('get-app-version', () => {
-    const { app } = require('electron');
     return app.getVersion();
   });
 
+
   // Example of deep version check logic requested by user
   ipcMain.handle('check-version-status', async (event, remoteConfig) => {
-    const { app } = require('electron');
     const currentVersion = app.getVersion();
+
     
     // remoteConfig would come from the database/API call in the renderer
     const { latest_version, min_supported_version } = remoteConfig;
@@ -150,8 +173,7 @@ function initialize(window) {
   });
 }
 
-const { app } = require('electron');
-
 module.exports = {
   initialize
 };
+

@@ -13,6 +13,10 @@ class ChatUI {
     this.messages = [];
     this.currentChatId = 'default';
     this.context = null; // Optional context/description for the chat
+    this.githubUrl = null; // GitHub repository URL
+    this.includeGithub = false; // Whether to use GitHub context
+    this.githubTree = null; // Cached file tree for the repository
+    this.githubService = typeof GithubService !== 'undefined' ? new GithubService() : null;
     this.autoSaveTimer = null;
     this.isBlurred = false;
   }
@@ -199,6 +203,9 @@ class ChatUI {
         } else {
           this.messages = result.data.messages || [];
           this.context = result.data.context || null;
+          this.githubUrl = result.data.githubUrl || null;
+          this.includeGithub = result.data.includeGithub || false;
+          this.githubTree = result.data.githubTree || null;
         }
         this.rerenderMessages();
         this.autoScroll();
@@ -216,7 +223,10 @@ class ChatUI {
       // Save with context if available
       const chatData = {
         messages: this.messages,
-        context: this.context || null
+        context: this.context || null,
+        githubUrl: this.githubUrl || null,
+        includeGithub: this.includeGithub || false,
+        githubTree: this.githubTree || null
       };
       await window.electronAPI.saveChat(this.currentChatId, chatData);
     } catch (error) {
@@ -242,14 +252,41 @@ class ChatUI {
   }
   
   /**
-   * Switch to a different chat
    * @param {string} chatId - Chat ID
    * @param {string|null} context - Optional context
+   * @param {Object|null} github - Optional GitHub info { githubUrl, includeGithub }
    */
-  async switchChat(chatId, context = null) {
+  async switchChat(chatId, context = null, github = null) {
     this.currentChatId = chatId;
     this.context = context;
+    if (github) {
+      this.githubUrl = github.githubUrl || null;
+      this.includeGithub = github.includeGithub || false;
+      // If we don't have the tree yet, fetch it
+      if (this.includeGithub && this.githubUrl && !this.githubTree) {
+        this.fetchRepoTree();
+      }
+    }
     await this.loadChatHistory();
+  }
+  
+  /**
+   * Fetch repository file tree
+   */
+  async fetchRepoTree() {
+    if (!this.githubService || !this.githubUrl) return;
+    
+    console.log('Fetching GitHub tree for:', this.githubUrl);
+    try {
+      const tree = await this.githubService.fetchFileTree(this.githubUrl);
+      if (tree) {
+        this.githubTree = tree;
+        console.log('GitHub tree fetched successfully:', tree.length, 'files');
+        this.scheduleAutoSave(); // Persist tree in metadata
+      }
+    } catch (error) {
+      console.error('Failed to fetch GitHub tree:', error);
+    }
   }
   
   /**

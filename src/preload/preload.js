@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Chat operations
   saveChat: (chatId, messages) => ipcRenderer.invoke('save-chat', chatId, messages),
   loadChat: (chatId) => ipcRenderer.invoke('load-chat', chatId),
+  getChat: (chatId) => ipcRenderer.invoke('load-chat', chatId), // Legacy/Alias support
   listChats: () => ipcRenderer.invoke('list-chats'),
   deleteChat: (chatId) => ipcRenderer.invoke('delete-chat', chatId),
 
@@ -46,10 +47,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendAIMessage: (providerConfig, messages) => ipcRenderer.invoke('send-ai-message', providerConfig, messages),
 
   // AI message with streaming (returns chunks)
-  sendAIMessageStream: async (providerConfig, messages, onChunk) => {
+  sendAIMessageStream: async (providerConfig, messages, chatId, onChunk) => {
+    // If chatId was not provided and onChunk is provided as 3rd arg
+    if (typeof chatId === 'function' && !onChunk) {
+      onChunk = chatId;
+      chatId = 'default';
+    }
     // Use proper streaming via IPC
     return new Promise((resolve, reject) => {
-      const channel = `ai-stream-${Date.now()}`;
+      const channel = `ai-stream-${chatId}-${Date.now()}`;
       let fullContent = '';
       let hasError = false;
 
