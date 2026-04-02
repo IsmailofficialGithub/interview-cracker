@@ -64,10 +64,10 @@ class VoiceAssistant {
     this.voiceActivityCheckInterval = null;
     this.isSpeaking = false;
     this.silenceStartTime = null;
-    this.silenceDurationThreshold = 400; // Reduced from 800ms for much faster response
-    this.speechThreshold = -50;  // Lowered from -40 to detect quieter system audio
-    this.silenceThreshold = -58; // Increased from -65 so slight background noise counts as silence
-    this.minRecordingDuration = 200; // Reduced from 500ms to allow faster turnaround
+    this.silenceDurationThreshold = 600; // Increased to 600ms for more natural pauses
+    this.speechThreshold = -70;  // EXTREMELY low to detect very quiet microphones
+    this.silenceThreshold = -80; // Even lower to distinguish from background noise
+    this.minRecordingDuration = 50; // Minimal buffer for ultra-fast reaction
     this.maxRecordingDuration = 30000; // Maximum 30 seconds of recording
     this.recordingStartTime = null;
     this.accumulatedChunks = []; // Store chunks while speaking
@@ -120,12 +120,16 @@ class VoiceAssistant {
         if (settings.voiceSensitivity) {
           this.silenceThreshold = settings.voiceSensitivity;
         } else {
-          this.silenceThreshold = -52; // Default more lenient value
+          this.silenceThreshold = -85; // Extreme sensitivity for quiet microphones
         }
         
-        console.log('[VoiceAssistant] VAD Config:', {
+        // Update speech threshold related to silence threshold
+        this.speechThreshold = this.silenceThreshold + 10; // Keep speech threshold 10dB above silence
+        
+        console.log('[VoiceAssistant] VAD Config Loaded (High Sensitivity):', {
           duration: `${this.silenceDurationThreshold}ms`,
-          dbThreshold: `${this.silenceThreshold}dB`
+          silenceDbThreshold: `${this.silenceThreshold}dB`,
+          speechDbThreshold: `${this.speechThreshold}dB`
         });
 
         console.log('[VoiceAssistant] Voice API setting:', voiceAPI);
@@ -434,6 +438,10 @@ class VoiceAssistant {
       let statusText = 'Listening...';
       if (this.isProcessing) {
         statusText = this.responseBuffer ? 'Responding...' : 'Thinking...';
+      } else if (this.isSpeaking) {
+        statusText = '<span style="color: #4aff4a; animation: pulse 0.5s infinite;">Hearing you...</span>';
+      } else if (this._hasAudioSinceLastLoop) {
+        statusText = '<span style="color: #88ff88;">Hearing noise...</span>';
       }
 
       let content = `
@@ -604,9 +612,13 @@ class VoiceAssistant {
       // Ensure window stays on top and focused before requesting permissions
       await this.ensureWindowOnTop();
 
-      // Request microphone access ONLY - explicitly exclude system audio
+      // Use user-selected device if available
+      const deviceId = this.config?.settings?.voiceDeviceId || 'default';
+      console.log(`[VoiceAssistant] Requesting microphone device: ${deviceId}`);
+
       this.audioStream = await navigator.mediaDevices.getUserMedia({
         audio: {
+          deviceId: deviceId !== 'default' ? { exact: deviceId } : undefined,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
@@ -615,15 +627,11 @@ class VoiceAssistant {
       });
 
       // Verify we got microphone tracks only
+      // Log audio tracks for debugging
       const audioTracks = this.audioStream.getAudioTracks();
-      console.log('MINE mode: Audio tracks:', audioTracks.length);
+      console.log('MINE mode: Audio tracks found:', audioTracks.length);
       audioTracks.forEach(track => {
-        if (track.label.toLowerCase().includes('desktop') ||
-          track.label.toLowerCase().includes('screen') ||
-          track.label.toLowerCase().includes('system')) {
-          console.warn('MINE mode: Warning - detected system audio track, stopping it');
-          track.stop();
-        }
+        console.log(`[VoiceAssistant] Track Label: "${track.label}", ID: ${track.id}, Enabled: ${track.enabled}, ReadyState: ${track.readyState}`);
       });
 
       // Bring window back to front
@@ -636,6 +644,9 @@ class VoiceAssistant {
       // Create AudioContext for Voice Activity Detection
       try {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if (this.audioContext.state === 'suspended') {
+          await this.audioContext.resume();
+        }
         const source = this.audioContext.createMediaStreamSource(this.audioStream);
         this.analyserNode = this.audioContext.createAnalyser();
         this.analyserNode.fftSize = 256;
@@ -649,7 +660,8 @@ class VoiceAssistant {
 
       // Create MediaRecorder
       this.mediaRecorder = new MediaRecorder(this.audioStream, {
-        mimeType: 'audio/webm;codecs=opus'
+        mimeType: 'audio/webm;codecs=opus',
+        audioBitsPerSecond: 128000
       });
 
       // Handle data available
@@ -699,28 +711,53 @@ class VoiceAssistant {
   /**
    * Check voice activity using audio analysis
    */
-  checkVoiceActivity() {
+  async checkVoiceActivity() {
     if (!this.analyserNode || !this.isActive) return;
 
     try {
       const now = Date.now();
-      const dataArray = new Uint8Array(this.analyserNode.frequencyBinCount);
-      this.analyserNode.getByteFrequencyData(dataArray);
+      
+      // Auto-resume AudioContext if suspended
+      if (this.audioContext && this.audioContext.state === 'suspended') {
+        console.log('[VoiceAssistant] AudioContext suspended, attempting resume...');
+        await this.audioContext.resume();
+      }
 
-      // Calculate average volume
-      const sum = dataArray.reduce((a, b) => a + b, 0);
-      const average = sum / dataArray.length;
+      // Use TimeDomainData for faster peak detection (better for quiet microphones)
+      const dataArray = new Uint8Array(this.analyserNode.fftSize);
+      this.analyserNode.getByteTimeDomainData(dataArray);
 
-      // Convert to dB (0-255 range, normalize and convert to dB)
-      // Avoid log(0) by adding small value
-      const normalized = average / 255;
+      // Find peek value (offset from center 128)
+      let maxVal = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const val = Math.abs(dataArray[i] - 128);
+        if (val > maxVal) maxVal = val;
+      }
+
+      // Convert peak to dB
+      // maxVal is 0-127. Normalize to 0-1.0
+      const normalized = maxVal / 128;
+      // Convert to dB. 
+      // -100 dB is silence, -3 dB is very loud.
       const volume = normalized > 0 ? 20 * Math.log10(normalized) : -100;
 
       // Log volume level periodically (every 1 second) to help debug
       if (!this._lastVolLogTime || now - this._lastVolLogTime > 1000) {
-        console.log(`[VoiceAssistant] VAD Volume: ${volume.toFixed(2)} dB (Speech > ${this.speechThreshold}, Silence < ${this.silenceThreshold})`);
+        console.log(`[VoiceAssistant] VAD (Peak) Volume: ${volume.toFixed(2)} dB (Min: ${this.silenceThreshold} dB, Speech: ${this.speechThreshold} dB)`);
         this._lastVolLogTime = now;
       }
+      
+      // Check for audio activity
+      const hasAudio = volume > this.silenceThreshold;
+      if (hasAudio !== this._hasAudioSinceLastLoop) {
+        this._hasAudioSinceLastLoop = hasAudio;
+        // Frequency-throttle status update (max 10Hz)
+        if (!this._lastStatusChangeTime || now - this._lastStatusChangeTime > 100) {
+          this.updateStatus();
+          this._lastStatusChangeTime = now;
+        }
+      }
+
       const recordingDuration = this.recordingStartTime ? now - this.recordingStartTime : 0;
 
       // Check for maximum recording duration
@@ -990,8 +1027,16 @@ class VoiceAssistant {
    * Send audio to transcription API
    */
   async processAudioBlob(audioBlob) {
+    // If already processing, wait up to 2 seconds for it to finish before skipping
+    // This handles cases where one sentence is being transcribed while another is being captured
+    let waitCount = 0;
+    while (this.isProcessing && waitCount < 10) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      waitCount++;
+    }
+
     if (this.isProcessing) {
-      console.log('[VoiceAssistant] Still processing previous request, skipping');
+      console.warn('[VoiceAssistant] Still processing previous request after waiting, skipping to avoid congestion');
       return;
     }
 
@@ -1093,18 +1138,15 @@ class VoiceAssistant {
     // Deprecated in favor of stop-start cycle
   }
 
-  /**
-   * Check if text is meaningful speech (enhanced filtering)
-   */
   isMeaningfulSpeech(text) {
-    if (!text || text.length < 3) return false;
+    if (!text || text.length < 2) return false;
 
     // Filter out common transcription artifacts
     const noisePatterns = [
       /^[\s\.,!?\-]+$/,  // Only punctuation/whitespace
-      /^(uh|um|ah|er|hmm|mm|huh)+$/i,  // Only filler words
+      /^(uh|um|ah|er|hmm|mm|huh|un|ugh|oh|uhm|mmm)+$/i,  // Only filler words
       /^[^\w\s]+$/,  // Only special characters
-      /^[a-z]{1,2}$/i,  // Single or double letter (likely noise)
+      /^(.)\1+$/i,   // Repeated single character like "aaaa"
     ];
 
     for (const pattern of noisePatterns) {
@@ -1113,14 +1155,22 @@ class VoiceAssistant {
       }
     }
 
-    // Check if it has actual words (minimum 2-3 words for meaningful speech)
-    const words = text.split(/\s+/).filter(w => w.length > 1);
+    // Check if it has actual words
+    const words = text.split(/\s+/).filter(w => w.length >= 1);
+    
+    // Very short words (1-2 chars) that are not in the list
+    if (text.length < 2) return false;
+
     if (words.length < 2) {
       // Single word - only accept if it's a question word or important word
-      const questionWords = ['what', 'who', 'where', 'when', 'why', 'how', 'which', 'whose'];
-      const importantWords = ['yes', 'no', 'ok', 'okay', 'help', 'stop', 'start'];
-      const lowerText = text.toLowerCase().trim();
-      if (!questionWords.includes(lowerText) && !importantWords.includes(lowerText)) {
+      // Single word - only accept if it's common conversational word
+      const commonWords = [
+        'what', 'who', 'where', 'when', 'why', 'how', 'which', 'whose',
+        'yes', 'no', 'ok', 'okay', 'help', 'stop', 'start', 'wait', 'go',
+        'hello', 'hi', 'hey', 'thanks', 'thank', 'cool', 'nice', 'good', 'bad'
+      ];
+      const lowerText = text.toLowerCase().trim().replace(/[?.!,]/g, '');
+      if (!commonWords.includes(lowerText)) {
         return false;
       }
     }
