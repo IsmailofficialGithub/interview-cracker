@@ -198,6 +198,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateError: (callback) => {
     ipcRenderer.on('update-error', (event, message) => callback(message));
     return () => ipcRenderer.removeListener('update-error', callback);
+  },
+
+  // Overlay Controls
+  toggleOverlay: () => ipcRenderer.invoke('toggle-overlay'),
+  setOverlayIgnoreMouse: (ignore) => ipcRenderer.invoke('set-overlay-ignore-mouse', ignore),
+  getOverlayBounds: () => ipcRenderer.invoke('get-overlay-bounds'),
+  captureOverlayArea: (bounds) => ipcRenderer.invoke('capture-overlay-area', bounds),
+  onOverlayStateChanged: (callback) => {
+    ipcRenderer.on('overlay-state-changed', (event, data) => callback(data));
+    return () => ipcRenderer.removeListener('overlay-state-changed', callback);
+  },
+  sendToChat: (text) => ipcRenderer.invoke('send-to-chat', text),
+  onOverlayTextExtracted: (callback) => {
+    ipcRenderer.on('overlay-text-extracted', (event, text) => callback(text));
+    return () => ipcRenderer.removeListener('overlay-text-extracted', callback);
   }
 });
 

@@ -137,6 +137,43 @@
       this.voiceTranscriptEl = document.getElementById('voice-transcript');
       this.listenButton = document.getElementById('listen-button');
 
+      const scanBtn = document.getElementById('scan-button');
+      if (scanBtn) {
+        scanBtn.addEventListener('click', () => {
+          window.electronAPI.toggleOverlay();
+        });
+        
+        window.electronAPI.onOverlayStateChanged((data) => {
+          if (data.visible) {
+            scanBtn.classList.add('active');
+            scanBtn.style.color = '#ff4b2b';
+          } else {
+            scanBtn.classList.remove('active');
+            scanBtn.style.color = '';
+          }
+        });
+
+        window.electronAPI.onOverlayTextExtracted((text) => {
+          console.log('[RENDERER] Received extracted text from overlay:', text);
+          const messageInput = document.getElementById('message-input');
+          if (messageInput) {
+            console.log('[RENDERER] Found message-input, updating value...');
+            // Append or replace? Let's append with a newline if there's already text
+            if (messageInput.value.trim()) {
+              messageInput.value += '\n' + text;
+            } else {
+              messageInput.value = text;
+            }
+            
+            // Focus the input
+            messageInput.focus();
+            
+            // Trigger input event for auto-resize
+            messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        });
+      }
+
       if (!this.listenButton) return;
 
       // Check user's voice API preference from settings

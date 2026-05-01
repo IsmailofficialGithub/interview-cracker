@@ -5,6 +5,10 @@
 
 const { app, BrowserWindow, ipcMain, globalShortcut, screen } = require('electron');
 const path = require('path');
+
+// Disable hardware acceleration to prevent potential rendering issues or black screens
+app.disableHardwareAcceleration();
+
 const windowManager = require('./window-manager');
 const systemTray = require('./system-tray');
 const ipcHandlers = require('./ipc-handlers');
@@ -13,6 +17,7 @@ const ghostTyper = require('./ghost-typer');
 const windowManagerService = require('./window-manager-service');
 const appDiscoveryService = require('./app-discovery-service');
 const autoUpdaterModule = require('./auto-updater');
+const overlayManager = require('./overlay-manager');
 
 // Security: Disable remote module
 app.allowRendererProcessReuse = true;
@@ -21,6 +26,7 @@ let mainWindow = null;
 let sessionKey = null; // Encrypted session key (memory only)
 let savedBounds = null; // Store window position/size when hidden
 let currentShortcut = 'Ctrl+Alt+H'; // Hide shortcut
+let overlayShortcut = 'Ctrl+Alt+O'; // Overlay shortcut
 let ghostTypeShortcut = 'Ctrl+Alt+V'; // Ghost Type shortcut
 let quitShortcut = 'Ctrl+Alt+Q'; // Quit shortcut
 let ghostWpm = 60; // Ghost WPM
@@ -196,7 +202,7 @@ function createWindow() {
     try {
       windowManagerService.initialize(mainWindow);
       appDiscoveryService.initialize();
-      
+
       if (process.platform === 'win32') {
         // Hook window resize events for native embedding
         mainWindow.on('resize', () => {
@@ -204,7 +210,7 @@ function createWindow() {
           windowManagerService.resizeAllWindows(bounds.width, bounds.height);
         });
       }
-      
+
       // Monitor processes periodically
       setInterval(() => {
         windowManagerService.monitorProcesses();
@@ -302,6 +308,9 @@ function initializeApp() {
   // Initialize security monitor
   securityMonitor.initialize();
 
+  // Initialize overlay manager
+  overlayManager.initialize();
+
   // Create window
   createWindow();
 }
@@ -348,7 +357,7 @@ if (!gotTheLock) {
 app.on('before-quit', () => {
   sessionKey = null;
   securityMonitor.shutdown();
-  
+
   // Cleanup embedded windows
   if (process.platform === 'win32') {
     try {
@@ -400,24 +409,24 @@ function resizeWindow(deltaWidth, deltaHeight) {
     console.error('Cannot resize: window is null or destroyed');
     return;
   }
-  
+
   console.log(`Resizing window by ${deltaWidth}x${deltaHeight}`);
-  
+
   // Temporarily enable resizing for programmatic changes
   mainWindow.setResizable(true);
-  
+
   const bounds = mainWindow.getBounds();
   const newWidth = Math.max(400, bounds.width + deltaWidth);  // Minimum 400px
   const newHeight = Math.max(300, bounds.height + deltaHeight);  // Minimum 300px
-  
+
   console.log(`Setting window size to ${newWidth}x${newHeight} (was ${bounds.width}x${bounds.height})`);
   mainWindow.setSize(newWidth, newHeight);
-  
+
   // Notify renderer about resize for responsive scaling
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('window-resized', { width: newWidth, height: newHeight });
   }
-  
+
   // Disable resizing again after change
   mainWindow.setResizable(false);
   console.log('Window resize complete');
@@ -432,15 +441,15 @@ function moveWindow(direction) {
     console.error('Cannot move: window is null or destroyed');
     return;
   }
-  
+
   const moveStep = 50;  // Move by 50px each time
   const bounds = mainWindow.getBounds();
   const display = screen.getPrimaryDisplay();
   const workArea = display.workArea;  // Work area excludes taskbar
-  
+
   let newX = bounds.x;
   let newY = bounds.y;
-  
+
   switch (direction) {
     case 'left':
       newX = Math.max(workArea.x, bounds.x - moveStep);
@@ -462,7 +471,7 @@ function moveWindow(direction) {
       console.error(`Invalid direction: ${direction}`);
       return;
   }
-  
+
   console.log(`Moving window from (${bounds.x}, ${bounds.y}) to (${newX}, ${newY})`);
   mainWindow.setPosition(newX, newY);
   console.log('Window move complete');
@@ -472,15 +481,15 @@ function moveWindow(direction) {
 // Converts "Ctrl+Alt+H" to "CommandOrControl+Alt+H"
 function convertShortcutFormat(shortcut) {
   if (!shortcut) return shortcut;
-  
+
   // If already in Electron format, return as-is
   if (shortcut.includes('CommandOrControl') || shortcut.includes('Control')) {
     return shortcut;
   }
-  
+
   // Replace Ctrl with CommandOrControl (works on both Windows and macOS)
   let converted = shortcut.replace(/\bCtrl\b/gi, 'CommandOrControl');
-  
+
   // Normalize key names - ensure single letter keys are uppercase
   const parts = converted.split('+');
   if (parts.length > 0) {
@@ -491,7 +500,7 @@ function convertShortcutFormat(shortcut) {
       converted = parts.join('+');
     }
   }
-  
+
   return converted;
 }
 
@@ -508,17 +517,17 @@ function registerGlobalShortcut() {
       if (shortcut !== electronShortcut) {
         console.log(`Converting shortcut: "${shortcut}" -> "${electronShortcut}"`);
       }
-      
+
       // Check if already registered by this app
       if (globalShortcut.isRegistered(electronShortcut)) {
         // Try to unregister first
         globalShortcut.unregister(electronShortcut);
       }
-      
+
       const ret = globalShortcut.register(electronShortcut, callback);
       if (!ret) {
         console.warn(`Registration failed for shortcut: ${description || shortcut} (tried: ${electronShortcut})`);
-        
+
         // Try fallback shortcuts if provided
         if (fallbacks && fallbacks.length > 0) {
           for (const fallback of fallbacks) {
@@ -532,7 +541,7 @@ function registerGlobalShortcut() {
             }
           }
         }
-        
+
         // Check if shortcut is already registered by another application
         if (globalShortcut.isRegistered(electronShortcut)) {
           console.warn(`  Note: Shortcut "${electronShortcut}" is already registered by another application`);
@@ -565,6 +574,11 @@ function registerGlobalShortcut() {
     ghostTyper.typeClipboard(ghostWpm, ghostMistakeChance, ghostMaxMistakes);
   }, ghostTypeShortcut, ['CommandOrControl+Alt+Shift+V', 'CommandOrControl+Shift+V']);
 
+  // Overlay Shortcut
+  safeRegister(overlayShortcut, () => {
+    overlayManager.toggleOverlay();
+  }, overlayShortcut, ['CommandOrControl+Alt+Shift+O', 'CommandOrControl+Shift+O']);
+
   // Quit Shortcut
   safeRegister(quitShortcut, () => {
     console.log('Quit shortcut triggered, exiting...');
@@ -580,7 +594,7 @@ function registerGlobalShortcut() {
     'CommandOrControl+Alt+=',
     'CommandOrControl+Alt+Shift+='
   ];
-  
+
   let plusRegistered = false;
   for (const format of plusFormats) {
     if (safeRegister(format, () => {
@@ -591,7 +605,7 @@ function registerGlobalShortcut() {
       break;
     }
   }
-  
+
   if (!plusRegistered) {
     console.error('All resize plus shortcut formats failed');
   }
@@ -666,13 +680,15 @@ ipcMain.handle('update-ghost-mistake-chance', async (event, chance) => {
   return false;
 });
 
-ipcMain.handle('update-ghost-max-mistakes', async (event, max) => {
-  const newMax = parseInt(max);
-  if (!isNaN(newMax) && newMax >= 1) {
-    ghostMaxMistakes = newMax;
-    return true;
+ipcMain.handle('send-to-chat', (event, text) => {
+  console.log('[MAIN] send-to-chat received text:', text);
+  if (mainWindow) {
+    console.log('[MAIN] Forwarding text to main window...');
+    mainWindow.webContents.send('overlay-text-extracted', text);
+    return { success: true };
   }
-  return false;
+  console.error('[MAIN] mainWindow is null, cannot forward text');
+  return { success: false, error: 'Main window not available' };
 });
 
 // Clean up shortcuts
