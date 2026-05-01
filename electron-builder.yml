@@ -1,5 +1,5 @@
-appId: com.privateaichat.app
-productName: Private AI Chat
+appId: com.noctisai.app
+productName: Noctisai
 directories:
   output: dist
   buildResources: build
@@ -8,8 +8,15 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: assets/icon.ico
+  icon: assets/icon.png
   requestedExecutionLevel: requireAdministrator
+linux:
+  target:
+    - target: AppImage
+    - target: deb
+    - target: rpm
+  category: Utility
+  icon: assets/icon.png
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
@@ -17,8 +24,15 @@ nsis:
   createStartMenuShortcut: true
 files:
   - src/**/*
+  - assets/**/*
   - package.json
   - node_modules/**/*
-exclude:
-  - "**/*.{md,ts,map}"
+  - native/build/Release/*.node
+  - "!**/*.{md,ts,map}"
+  - "!native/src/**/*"
+  - "!native/binding.gyp"
+publish:
+  provider: github
+  owner: IsmailofficialGithub
+  repo: interview-cracker
 

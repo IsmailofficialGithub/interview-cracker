@@ -9,7 +9,9 @@
     "start": "electron .",
     "test": "node --test",
     "rebuild": "cd native && node-gyp rebuild",
-    "install": "cd native && node-gyp rebuild"
+    "install": "cd native && node-gyp rebuild",
+    "build:linux": "electron-builder --linux",
+    "build:linux:docker": "docker run --rm -v \".:/project\" -v \"%USERPROFILE%/.cache/electron:/root/.cache/electron\" -v \"%USERPROFILE%/.cache/electron-builder:/root/.cache/electron-builder\" electronuserland/builder:wine npm run build:linux"
   },
   "keywords": [
     "electron",
@@ -18,7 +20,7 @@
     "privacy",
     "encryption"
   ],
-  "author": "",
+  "author": "Noctisai <info@noctisai.app>",
   "license": "MIT",
   "devDependencies": {
     "electron": "^28.0.0",
@@ -33,37 +35,5 @@
     "marked": "^11.1.1",
     "node-addon-api": "^7.0.0",
     "semver": "^7.7.4"
-  },
-  "build": {
-    "appId": "com.noctisai.app",
-    "productName": "Noctisai",
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    },
-    "files": [
-      "src/**/*",
-      "assets/**/*",
-      "package.json",
-      "node_modules/**/*"
-    ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "IsmailofficialGithub",
-        "repo": "interview-cracker"
-      }
-    ]
   }
 }

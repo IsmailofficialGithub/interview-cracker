@@ -2,13 +2,6 @@
   "targets": [
     {
       "target_name": "window-manager",
-      "sources": [
-        "window-manager.cc",
-        "app-discovery.cc"
-      ],
-      "include_dirs": [
-        "."
-      ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")"
       ],
@@ -17,25 +10,33 @@
       ],
       "cflags!": [ "-fno-exceptions" ],
       "cflags_cc!": [ "-fno-exceptions" ],
-      "xcode_settings": {
-        "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
-        "CLANG_CXX_LIBRARY": "libc++",
-        "MACOSX_DEPLOYMENT_TARGET": "10.7"
-      },
-      "msvs_settings": {
-        "VCCLCompilerTool": {
-          "ExceptionHandling": 1
-        }
-      },
       "conditions": [
         [
           "OS=='win'",
           {
+            "sources": [
+              "window-manager.cc",
+              "app-discovery.cc"
+            ],
             "libraries": [
               "-luser32.lib",
               "-lkernel32.lib",
               "-lshell32.lib",
-              "-ladvapi32.lib"
+              "-ladvapi32.lib",
+              "-lshlwapi.lib"
+            ],
+            "msvs_settings": {
+              "VCCLCompilerTool": {
+                "ExceptionHandling": 1
+              }
+            }
+          }
+        ],
+        [
+          "OS!='win'",
+          {
+            "sources": [
+              "linux-stub.cc"
             ]
           }
         ]

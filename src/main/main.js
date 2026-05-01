@@ -169,27 +169,48 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  // CRITICAL: Allow microphone and media permissions (required for getUserMedia)
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media' || permission === 'microphone' || permission === 'camera') {
+      console.log(`[SECURITY] Permission granted: ${permission}`);
+      callback(true);
+    } else {
+      console.log(`[SECURITY] Permission denied: ${permission}`);
+      callback(false);
+    }
+  });
+
+  // Also handle permission checks (for preloaded contexts)
+  mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
+    if (permission === 'media' || permission === 'microphone' || permission === 'camera') {
+      return true;
+    }
+    return false;
+  });
+
   // Initialize window manager
   windowManager.initialize(mainWindow);
 
-  // Initialize desktop app embedding services (Windows only)
-  if (process.platform === 'win32') {
+  // Initialize desktop app embedding services
+  if (process.platform === 'win32' || process.platform === 'linux') {
     try {
       windowManagerService.initialize(mainWindow);
       appDiscoveryService.initialize();
       
-      // Hook window resize events
-      mainWindow.on('resize', () => {
-        const bounds = mainWindow.getBounds();
-        windowManagerService.resizeAllWindows(bounds.width, bounds.height);
-      });
+      if (process.platform === 'win32') {
+        // Hook window resize events for native embedding
+        mainWindow.on('resize', () => {
+          const bounds = mainWindow.getBounds();
+          windowManagerService.resizeAllWindows(bounds.width, bounds.height);
+        });
+      }
       
       // Monitor processes periodically
       setInterval(() => {
         windowManagerService.monitorProcesses();
       }, 5000); // Check every 5 seconds
     } catch (error) {
-      console.error('Failed to initialize desktop app embedding services:', error);
+      console.error('Failed to initialize desktop app services:', error);
     }
   }
 
