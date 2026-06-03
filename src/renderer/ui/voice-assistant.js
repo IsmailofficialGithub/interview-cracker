@@ -560,6 +560,13 @@ class VoiceAssistant {
       this._chunkTimer = null;
     }
 
+    // Clear YOURS mode silence timer
+    if (this._yoursSilenceTimer) {
+      clearTimeout(this._yoursSilenceTimer);
+      this._yoursSilenceTimer = null;
+    }
+    this._yoursRecording = false;
+
     // Stop recording
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
@@ -725,11 +732,71 @@ class VoiceAssistant {
   }
 
   /**
-   * Check voice activity — used for UI feedback only
-   * Recording happens continuously regardless of this result
+   * VAD tick for YOURS mode — starts recording on speech, stops on silence
+   */
+  _yoursVADTick() {
+    if (!this.analyserNode || !this.isActive || this.mode !== 'yours') return;
+
+    try {
+      const bufLen = this.analyserNode.frequencyBinCount;
+      const dataArray = new Uint8Array(bufLen);
+      this.analyserNode.getByteFrequencyData(dataArray);
+
+      let sum = 0;
+      for (let i = 0; i < bufLen; i++) sum += dataArray[i];
+      const avg = sum / bufLen;
+
+      // avg > 8 is a reasonable threshold for system audio speech vs silence/noise
+      // Adjust this if needed — higher = only react to louder audio
+      const speaking = avg > 8;
+
+      if (speaking !== this.isSpeaking) {
+        this.isSpeaking = speaking;
+        this.updateStatus();
+      }
+
+      if (speaking) {
+        // Cancel any pending silence timer
+        if (this._yoursSilenceTimer) {
+          clearTimeout(this._yoursSilenceTimer);
+          this._yoursSilenceTimer = null;
+        }
+
+        // Start recording if not already
+        if (!this._yoursRecording && this.mediaRecorder && this.mediaRecorder.state === 'inactive') {
+          this.currentCycleChunks = [];
+          this._yoursRecording = true;
+          try {
+            this.mediaRecorder.start();
+            console.log('[VoiceAssistant] YOURS VAD: Speech detected, recording started');
+          } catch (e) {
+            console.error('[VoiceAssistant] YOURS VAD: start() failed:', e.message);
+            this._yoursRecording = false;
+          }
+        }
+      } else {
+        // Silence — start a timer to stop recording
+        if (this._yoursRecording && !this._yoursSilenceTimer) {
+          const silenceMs = this.silenceDurationThreshold || 1000;
+          this._yoursSilenceTimer = setTimeout(() => {
+            this._yoursSilenceTimer = null;
+            if (this._yoursRecording && this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+              console.log(`[VoiceAssistant] YOURS VAD: Silence for ${silenceMs}ms, stopping recording to process`);
+              this.mediaRecorder.stop();
+            }
+          }, silenceMs);
+        }
+      }
+    } catch (e) {
+      // Ignore VAD errors
+    }
+  }
+
+  /**
+   * Check voice activity — used for UI feedback in MINE mode
    */
   async checkVoiceActivity() {
-    if (!this.analyserNode || !this.isActive) return;
+    if (!this.analyserNode || !this.isActive || this.mode !== 'mine') return;
 
     try {
       // Use FrequencyData for volume measurement
@@ -911,48 +978,46 @@ class VoiceAssistant {
       // Initialize chunk storage
       this.currentCycleChunks = [];
       this.accumulatedChunks = [];
+      this._yoursRecording = false; // Are we actively recording speech?
+      this._yoursSilenceTimer = null;
 
       // Create MediaRecorder
-      this.mediaRecorder = new MediaRecorder(this.audioStream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus' : 'audio/webm';
+      this.mediaRecorder = new MediaRecorder(this.audioStream, { mimeType });
 
-      // Handle data available
+      // Collect chunks while recording
       this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           this.currentCycleChunks.push(event.data);
-          this.accumulatedChunks.push(event.data);
         }
       };
 
-      // Handle stop
+      // When recording stops, process the captured speech
       this.mediaRecorder.onstop = async () => {
+        this._yoursRecording = false;
         if (this.currentCycleChunks.length > 0) {
-          const blob = new Blob(this.currentCycleChunks, { type: 'audio/webm' });
-          this.currentCycleChunks = []; // Reset for next cycle
-          await this.processAudioBlob(blob);
-        }
-
-        // Restart if still active
-        if (this.isActive) {
-          setTimeout(() => {
-            if (this.isActive) {
-              this.startRecordingCycle();
-            }
-          }, 200);
+          const blob = new Blob(this.currentCycleChunks, { type: mimeType });
+          this.currentCycleChunks = [];
+          if (blob.size >= 8000) { // Only send if there is real audio
+            await this.processAudioBlob(blob);
+          } else {
+            console.log('[VoiceAssistant] YOURS: Blob too small after speech, discarding.');
+          }
         }
       };
 
-      // Start VAD checking interval
+      // Start VAD-driven recording loop for YOURS mode
       if (this.analyserNode) {
         this.voiceActivityCheckInterval = setInterval(() => {
-          this.checkVoiceActivity();
-        }, 40); // Same for YOURS mode
-        console.log('[VoiceAssistant] YOURS: VAD checking started');
+          this._yoursVADTick();
+        }, 40);
+        console.log('[VoiceAssistant] YOURS: VAD-gated recording started');
+      } else {
+        // No analyser - fall back to 10s cycles
+        this.startRecordingCycle();
       }
 
-      // Start the first recording cycle
-      this.startRecordingCycle();
       console.log('[VoiceAssistant] YOURS mode fully active');
 
     } catch (error) {
