@@ -413,7 +413,7 @@ class VoiceAssistant {
         <i data-feather="volume-2" class="icon"></i> YOURS
       </span>
     `;
-    modeToggle.title = 'Toggle between MINE MODE (Microphone) and YOURS MODE (System Audio)';
+    modeToggle.title="";
     return modeToggle;
   }
 
