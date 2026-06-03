@@ -899,7 +899,7 @@ class VoiceAssistant {
             noiseSuppression: false,
             autoGainControl: false,
             suppressLocalAudioPlayback: false,
-            sampleRate: 44100
+            sampleRate: 16000  // Whisper works best at 16kHz, smaller file = faster upload
           },
           video: true // Required for getDisplayMedia
         });
