@@ -161,8 +161,10 @@ class ChatUI {
   /**
    * Auto-scroll to bottom
    */
-  autoScroll() {
-    this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+  autoScroll(force = false) {
+    setTimeout(() => {
+      this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+    }, 50);
   }
   
   /**
@@ -208,7 +210,7 @@ class ChatUI {
           this.githubTree = result.data.githubTree || null;
         }
         this.rerenderMessages();
-        this.autoScroll();
+        this.autoScroll(true);
       }
     } catch (error) {
       console.error('Failed to load chat history:', error);

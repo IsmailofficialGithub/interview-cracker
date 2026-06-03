@@ -80,6 +80,7 @@
 
       this.setupEventListeners();
       this.loadChatHistory();
+      
       this.startAutoSave();
 
       window.electronAPI.onWindowBlur(() => {
@@ -195,7 +196,7 @@
           // Check if voice is enabled
           if (settings.voiceEnabled === false) {
             this.listenButton.disabled = true;
-            this.listenButton.title = 'Voice input is disabled in Settings';
+            this.listenButton.title="";
             if (window.logsPanel) {
               window.logsPanel.addLog('warn', 'Voice input is disabled in settings', null, {
                 source: 'VoiceInput',
@@ -413,7 +414,7 @@
           } else {
             // No fallback available
             if (this.listenButton) {
-              this.listenButton.title = 'Voice input not available. Web Speech API not supported and no OpenAI API key configured.';
+              this.listenButton.title="";
               this.listenButton.disabled = true;
               this.listenButton.style.opacity = '0.5';
             }
@@ -433,13 +434,13 @@
       // Check if MediaRecorder is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         this.listenButton.disabled = true;
-        this.listenButton.title = 'Microphone access not available in this browser';
+        this.listenButton.title="";
         this.showVoiceError('MediaRecorder API not supported. Please use a modern browser.');
         return;
       }
 
       this.listenButton.innerHTML = '<i data-feather="mic" class="icon icon-small"></i> Listen';
-      this.listenButton.title = 'Start voice input with OpenAI Whisper (CTRL+L)';
+      this.listenButton.title="";
       if (typeof feather !== 'undefined') feather.replace();
 
       // Listen button click - check if VoiceAssistant is handling it first
@@ -2185,13 +2186,15 @@
       setTimeout(() => this.updateScrollButton(), 100);
     }
 
-    autoScroll() {
-      // Only auto-scroll if user is already at the bottom (within 50px)
-      const isNearBottom = this.chatContainer.scrollHeight - this.chatContainer.scrollTop - this.chatContainer.clientHeight < 50;
-      if (isNearBottom) {
-        this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
-      }
-      this.updateScrollButton();
+    autoScroll(force = false) {
+      setTimeout(() => {
+        // Only auto-scroll if user is already at the bottom (within 50px) or if force is true
+        const isNearBottom = this.chatContainer.scrollHeight - this.chatContainer.scrollTop - this.chatContainer.clientHeight < 50;
+        if (isNearBottom || force) {
+          this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+        }
+        this.updateScrollButton();
+      }, 50);
     }
 
     setupScrollButton() {
@@ -2488,7 +2491,7 @@
           });
 
           this.rerenderMessages();
-          this.autoScroll();
+          this.autoScroll(true);
         } else {
           // No data or failed to load - start with empty chat
           this.messages = [];
@@ -2624,7 +2627,7 @@
       }
 
       this.rerenderMessages();
-      this.autoScroll();
+      this.autoScroll(true);
 
       // Refresh sidebar highlight if it exists
       if (typeof loadChatsList === 'function') {
@@ -4322,8 +4325,8 @@
                 <div class="chat-item-date">${dateStr}</div>
               </div>
               <div class="chat-item-actions">
-                <button class="chat-edit-btn" data-chat-id="${chat.id}" title="Edit chat"><i data-feather="edit-2" class="icon-tiny"></i></button>
-                <button class="chat-delete-btn" data-chat-id="${chat.id}" title="Delete chat"><i data-feather="trash-2" class="icon-tiny"></i></button>
+                <button class="chat-edit-btn" data-chat-id="${chat.id}"><i data-feather="edit-2" class="icon-tiny"></i></button>
+                <button class="chat-delete-btn" data-chat-id="${chat.id}"><i data-feather="trash-2" class="icon-tiny"></i></button>
               </div>
             </div>
           `;
@@ -4641,7 +4644,7 @@
       tabButton.dataset.tabId = tabId;
       tabButton.innerHTML = `
         <span class="browser-tab-title">${incognito ? '<i data-feather="lock" class="icon icon-small"></i> ' : ''}New Tab</span>
-        <button class="browser-tab-close" title="Close tab"><i data-feather="x" class="icon icon-small"></i></button>
+        <button class="browser-tab-close"><i data-feather="x" class="icon icon-small"></i></button>
       `;
       if (typeof feather !== 'undefined') feather.replace();
 
@@ -5101,7 +5104,7 @@
           <div class="desktop-apps-header">
             <h3>Installed Apps</h3>
             <div class="desktop-apps-header-actions">
-              <button id="desktop-apps-refresh" class="desktop-apps-refresh-btn" title="Refresh Apps">
+              <button id="desktop-apps-refresh" class="desktop-apps-refresh-btn">
                 <i data-feather="refresh-cw" class="icon icon-small"></i>
               </button>
             </div>
@@ -5109,7 +5112,7 @@
           <div class="desktop-apps-search">
             <i data-feather="search" class="desktop-apps-search-icon"></i>
             <input type="text" id="desktop-apps-search-input" class="desktop-apps-search-input" placeholder="Search apps...">
-            <button id="desktop-apps-search-clear" class="desktop-apps-search-clear" title="Clear search" style="display: none;">
+            <button id="desktop-apps-search-clear" class="desktop-apps-search-clear" style="display: none;">
               <i data-feather="x" class="icon icon-small"></i>
             </button>
           </div>
@@ -5227,7 +5230,7 @@
             <div class="desktop-app-name">${app.name || 'Unknown App'}</div>
             <div class="desktop-app-path">${app.path || ''}</div>
           </div>
-          <button class="desktop-app-add-btn" data-app-id="${app.id}" title="Launch App">
+          <button class="desktop-app-add-btn" data-app-id="${app.id}">
             <i data-feather="play" class="icon icon-small"></i>
           </button>
         `;
@@ -5339,7 +5342,7 @@
       tab.className = 'desktop-app-tab';
       tab.dataset.tabId = tabId;
       tab.innerHTML = `
-        <button class="desktop-app-tab-close" data-tab-id="${tabId}" title="Close">
+        <button class="desktop-app-tab-close" data-tab-id="${tabId}">
           <i data-feather="x" class="icon icon-small"></i>
         </button>
         <span class="desktop-app-tab-title">${appName}</span>
