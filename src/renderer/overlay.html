@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Overlay</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: transparent;
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+        }
+
+        #overlay-container {
+            width: 100%;
+            height: 100%;
+            border: 2px solid rgba(0, 150, 255, 0.5);
+            box-sizing: border-box;
+            background-color: rgba(0, 150, 255, 0.05);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            -webkit-app-region: drag;
+        }
+
+        #overlay-header {
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 4px 10px;
+            font-size: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(4px);
+        }
+
+        #overlay-footer {
+            margin-top: auto;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 5px;
+            display: flex;
+            gap: 5px;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+            -webkit-app-region: no-drag;
+        }
+
+        .btn {
+            background: rgba(0, 150, 255, 0.8);
+            border: none;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            cursor: default;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: rgba(0, 150, 255, 1);
+        }
+
+        .btn-capture {
+            background: #ff4b2b;
+        }
+
+        #status {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: none;
+            z-index: 1000;
+        }
+
+        .resizer {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: rgba(0, 150, 255, 0.3);
+            -webkit-app-region: no-drag;
+            right: 0;
+            bottom: 0;
+            cursor: default;
+        }
+
+        #preview-canvas {
+            display: none;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+    <div id="overlay-container">
+        <div id="overlay-header">
+            <span>OCR Selection Area</span>
+            <span id="coords">400x300</span>
+        </div>
+
+        <div id="status">Capturing...</div>
+        
+        <!-- Debug Preview Area -->
+        <div id="debug-preview" style="display:none; position:absolute; top:30px; left:0; width:100%; height:calc(100% - 70px); background:rgba(0,0,0,0.8); z-index:100; overflow:hidden;">
+            <img id="preview-img" style="max-width:100%; max-height:100%; object-fit:contain; border:1px solid white;">
+            <div style="color:white; font-size:8px; text-align:center;">OCR Input Preview</div>
+        </div>
+
+        <div id="overlay-footer">
+            <button class="btn btn-capture" id="capture-btn">Capture Text</button>
+            <button class="btn" id="hide-btn">Hide</button>
+            <button class="btn" id="lock-btn">Lock Click</button>
+        </div>
+        
+        <div class="resizer"></div>
+        <canvas id="preview-canvas"></canvas>
+    </div>
+
+    <script type="module">
+        const { electronAPI } = window;
+
+        const captureBtn = document.getElementById('capture-btn');
+        const hideBtn = document.getElementById('hide-btn');
+        const lockBtn = document.getElementById('lock-btn');
+        const status = document.getElementById('status');
+        const coords = document.getElementById('coords');
+        const previewCanvas = document.getElementById('preview-canvas');
+
+        let isLocked = false;
+
+        const updateCoords = async () => {
+            const res = await electronAPI.getOverlayBounds();
+            if (res.success) {
+                coords.textContent = `${res.bounds.width}x${res.bounds.height}`;
+            }
+        };
+
+        window.addEventListener('resize', updateCoords);
+        updateCoords();
+
+        async function captureScreen() {
+            console.log('[OVERLAY] captureScreen triggered');
+            try {
+                const boundsRes = await electronAPI.getOverlayBounds();
+                console.log('[OVERLAY] Bounds retrieved:', boundsRes);
+                if (!boundsRes.success) {
+                    console.error('[OVERLAY] Failed to get overlay bounds');
+                    return;
+                }
+                const bounds = boundsRes.bounds;
+
+                console.log('[OVERLAY] Setting opacity to 0');
+                document.body.style.opacity = '0';
+                await new Promise(r => setTimeout(r, 150));
+
+                let result;
+                try {
+                    console.log('[OVERLAY] Calling captureOverlayArea with bounds:', bounds);
+                    result = await electronAPI.captureOverlayArea(bounds);
+                    console.log('[OVERLAY] captureOverlayArea result success:', result ? result.success : false);
+                } catch (captureErr) {
+                    console.error('[OVERLAY] Error during captureOverlayArea API call:', captureErr);
+                } finally {
+                    console.log('[OVERLAY] Setting opacity back to 1');
+                    document.body.style.opacity = '1';
+                }
+
+                if (result && result.success) {
+                    status.style.display = 'block';
+                    status.innerText = 'Extracting Text...';
+
+                    console.log('[OVERLAY] Loading captured image data...');
+                    const img = new Image();
+                    img.onload = async () => {
+                        console.log('[OVERLAY] Image loaded successfully, starting pre-processing...');
+                        const ctx = previewCanvas.getContext('2d');
+                        // Use a fixed scale for OCR processing (upscale for better results)
+                        const scale = 2; 
+                        
+                        previewCanvas.width = bounds.width * scale;
+                        previewCanvas.height = bounds.height * scale;
+                        
+                        // We use the scaleFactor from the main process to find the correct
+                        // pixel coordinates in the high-res thumbnail.
+                        const sf = result.scaleFactor || 1;
+                        console.log('[OVERLAY] Scale factor:', sf);
+                        
+                        ctx.drawImage(
+                            img, 
+                            bounds.x * sf, bounds.y * sf, bounds.width * sf, bounds.height * sf, 
+                            0, 0, previewCanvas.width, previewCanvas.height
+                        );
+                        
+                        // --- IMPROVED PREPROCESSING ---
+                        const imageData = ctx.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
+                        const data = imageData.data;
+                        
+                        // Detect background brightness
+                        let brightness = 0;
+                        for (let i = 0; i < data.length; i += 4) {
+                            brightness += (data[i] + data[i+1] + data[i+2]) / 3;
+                        }
+                        const isDark = (brightness / (data.length / 4)) < 128;
+                        console.log('[OVERLAY] Background brightness detection. isDark:', isDark);
+
+                        for (let i = 0; i < data.length; i += 4) {
+                            let gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+                            if (isDark) gray = 255 - gray; // Invert dark backgrounds
+                            
+                            // Adaptive-ish threshold
+                            const value = gray > 140 ? 255 : 0; 
+                            data[i] = data[i+1] = data[i+2] = value;
+                        }
+                        ctx.putImageData(imageData, 0, 0);
+
+                        const croppedDataUrl = previewCanvas.toDataURL('image/png');
+                        
+                        // Show debug preview
+                        const debugPreview = document.getElementById('debug-preview');
+                        const previewImg = document.getElementById('preview-img');
+                        if (debugPreview && previewImg) {
+                            previewImg.src = croppedDataUrl;
+                            debugPreview.style.display = 'block';
+                            setTimeout(() => {
+                                debugPreview.style.display = 'none';
+                            }, 3000);
+                        }
+                        
+                        console.log('[OVERLAY] OCR Debug Image created');
+
+                        try {
+                            console.log('[OVERLAY] Creating Tesseract Worker...');
+                            const worker = await Tesseract.createWorker('eng');
+                            // PSM 3 is generally more robust for varied screen text
+                            await worker.setParameters({
+                                tessedit_pageseg_mode: '3',
+                            });
+                            console.log('[OVERLAY] Running Tesseract recognition...');
+                            const ret = await worker.recognize(croppedDataUrl);
+                            let text = ret.data.text.trim();
+                            await worker.terminate();
+
+                            // Less aggressive noise filter
+                            if (text && text.replace(/[\s\.o]+/g, '').length > 0) {
+                                console.log('[OVERLAY] Text extracted:', text);
+                                status.innerText = 'Text Sent to Chat!';
+                                await electronAPI.sendToChat(text);
+                            } else {
+                                console.log('[OVERLAY] No valid text found (noise):', text);
+                                status.innerText = 'No text found';
+                            }
+                        } catch (ocrErr) {
+                            console.error('[OVERLAY] OCR Error:', ocrErr);
+                            status.innerText = 'OCR Failed';
+                        }
+                        
+                        setTimeout(() => {
+                            status.style.display = 'none';
+                        }, 2000);
+                    };
+                    img.onerror = (imgErr) => {
+                        console.error('[OVERLAY] Image failed to load:', imgErr);
+                        status.innerText = 'Image load failed';
+                        setTimeout(() => {
+                            status.style.display = 'none';
+                        }, 2000);
+                    };
+                    img.src = result.image;
+                } else {
+                    console.warn('[OVERLAY] Capture result success is false or result is null:', result);
+                }
+            } catch (err) {
+                console.error('[OVERLAY] Catch block error in captureScreen:', err);
+                status.innerText = 'Error';
+            }
+        }
+
+        captureBtn.addEventListener('click', captureScreen);
+        hideBtn.addEventListener('click', () => electronAPI.toggleOverlay());
+        
+        lockBtn.addEventListener('click', async () => {
+            isLocked = !isLocked;
+            await electronAPI.setOverlayIgnoreMouse(isLocked);
+            lockBtn.textContent = isLocked ? 'Unlock Mouse' : 'Lock Click';
+            lockBtn.style.background = isLocked ? '#444' : 'rgba(0, 150, 255, 0.8)';
+        });
+
+        // Custom resize handler logic
+        const resizer = document.querySelector('.resizer');
+        if (resizer) {
+            let isResizing = false;
+            let startWidth, startHeight, startX, startY;
+
+            resizer.addEventListener('mousedown', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const boundsRes = await electronAPI.getOverlayBounds();
+                if (!boundsRes.success) return;
+                
+                isResizing = true;
+                startWidth = boundsRes.bounds.width;
+                startHeight = boundsRes.bounds.height;
+                startX = e.screenX;
+                startY = e.screenY;
+
+                const doDrag = (dragEvent) => {
+                    if (!isResizing) return;
+                    const deltaX = dragEvent.screenX - startX;
+                    const deltaY = dragEvent.screenY - startY;
+                    
+                    const newWidth = Math.max(150, startWidth + deltaX);
+                    const newHeight = Math.max(50, startHeight + deltaY);
+                    
+                    electronAPI.setOverlayBounds({
+                        x: boundsRes.bounds.x,
+                        y: boundsRes.bounds.y,
+                        width: newWidth,
+                        height: newHeight
+                    });
+                };
+
+                const stopDrag = () => {
+                    isResizing = false;
+                    window.removeEventListener('mousemove', doDrag);
+                    window.removeEventListener('mouseup', stopDrag);
+                };
+
+                window.addEventListener('mousemove', doDrag);
+                window.addEventListener('mouseup', stopDrag);
+            });
+        }
+
+        // Dynamic click-through handling:
+        // When mouse hovers over interactive parts (header, footer, resizer), stop ignoring mouse clicks.
+        // When mouse leaves interactive parts, if locked, resume ignoring clicks.
+        const interactiveElements = [
+            document.getElementById('overlay-header'),
+            document.getElementById('overlay-footer'),
+            resizer
+        ];
+
+        interactiveElements.forEach(el => {
+            if (!el) return;
+            el.addEventListener('mouseenter', () => {
+                electronAPI.setOverlayIgnoreMouse(false);
+            });
+            el.addEventListener('mouseleave', () => {
+                if (isLocked) {
+                    electronAPI.setOverlayIgnoreMouse(true);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

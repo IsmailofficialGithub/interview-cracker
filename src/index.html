@@ -23,23 +23,26 @@
   <div class="header">
     <div class="header-title">Noctisai <span style="font-size: 0.6em; opacity: 0.5;">v1.0.1</span></div>
     <div class="header-controls">
-      <button id="browser-button" class="settings-button" title="Open Browser">
+      <button id="browser-button" class="settings-button">
         <i data-feather="globe" class="icon icon-small"></i> Browser
       </button>
-      <button id="desktop-apps-button" class="settings-button" title="Desktop Apps">
+      <button id="desktop-apps-button" class="settings-button">
         <i data-feather="monitor" class="icon icon-small"></i> Apps
       </button>
-      <button id="chats-button" class="settings-button" title="Chats">
+      <button id="chats-button" class="settings-button">
         <i data-feather="message-circle" class="icon icon-small"></i> Chats
       </button>
       <select id="provider-selector" class="provider-selector">
         <option value="">No provider</option>
       </select>
-      <button id="logs-button" class="settings-button" title="View Logs">
+      <button id="logs-button" class="settings-button">
         <i data-feather="file-text" class="icon icon-small"></i> Logs
       </button>
-      <button id="guide-button" class="settings-button" title="View Guide">
+      <button id="guide-button" class="settings-button">
         <i data-feather="help-circle" class="icon icon-small"></i> Guide
+      </button>
+      <button id="scan-button" class="settings-button">
+        <i data-feather="maximize" class="icon icon-small"></i> Scan
       </button>
       <button id="settings-button" class="settings-button">
         <i data-feather="settings" class="icon icon-small"></i> Settings
@@ -233,36 +236,36 @@
     <!-- Browser View -->
     <div id="browser-view" class="browser-view">
       <div class="browser-tabs-container" id="browser-tabs-container">
-        <button id="browser-new-tab" class="browser-new-tab-btn" title="New Tab">+</button>
-        <button id="browser-new-incognito-tab" class="browser-new-tab-btn" title="New Incognito Tab">
+        <button id="browser-new-tab" class="browser-new-tab-btn">+</button>
+        <button id="browser-new-incognito-tab" class="browser-new-tab-btn">
           <i data-feather="lock" class="icon"></i>
         </button>
         <div class="browser-window-controls">
-          <button id="browser-new-window" class="browser-new-window-btn" title="New Window">
+          <button id="browser-new-window" class="browser-new-window-btn">
             <i data-feather="square" class="icon icon-small"></i> New Window
           </button>
-          <button id="browser-incognito" class="browser-incognito-btn" title="New Incognito Window">
+          <button id="browser-incognito" class="browser-incognito-btn">
             <i data-feather="lock" class="icon icon-small"></i> Incognito
           </button>
         </div>
       </div>
       <div class="browser-toolbar">
-        <button id="browser-back" class="browser-nav-btn" title="Back">
+        <button id="browser-back" class="browser-nav-btn">
           <i data-feather="chevron-left" class="icon"></i>
         </button>
-        <button id="browser-forward" class="browser-nav-btn" title="Forward">
+        <button id="browser-forward" class="browser-nav-btn">
           <i data-feather="chevron-right" class="icon"></i>
         </button>
-        <button id="browser-home" class="browser-nav-btn" title="Home">
+        <button id="browser-home" class="browser-nav-btn">
           <i data-feather="home" class="icon"></i>
         </button>
         <input type="text" id="browser-url" class="browser-url-bar" placeholder="Enter URL or search..."
           value="https://www.google.com">
-        <button id="browser-go" class="browser-nav-btn" title="Go">Go</button>
-        <button id="browser-refresh" class="browser-refresh-btn" title="Refresh">
+        <button id="browser-go" class="browser-nav-btn">Go</button>
+        <button id="browser-refresh" class="browser-refresh-btn">
           <i data-feather="refresh-cw" class="icon"></i>
         </button>
-        <button id="browser-close-view" class="browser-close-btn" title="Close Browser">
+        <button id="browser-close-view" class="browser-close-btn">
           <i data-feather="x" class="icon"></i>
         </button>
       </div>
@@ -275,7 +278,7 @@
     <div id="chat-container" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
       <div id="chat-messages"
         style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; position: relative;">
-        <button id="scroll-to-bottom-btn" class="scroll-to-bottom-btn" title="Scroll to bottom" style="display: none;">
+        <button id="scroll-to-bottom-btn" class="scroll-to-bottom-btn" style="display: none;">
           <i data-feather="chevron-down" class="icon"></i>
         </button>
       </div>
@@ -299,7 +302,7 @@
         <textarea id="message-input" placeholder="Type your message... (Enter to send, Ctrl+Enter for new line)"
           rows="1"
           style="flex: 1; background: #1a1a1a; border: 1px solid #444; color: #e0e0e0; font-family: inherit; resize: none; cursor: default; caret-color: transparent;"></textarea>
-        <button id="listen-button" class="listen-button" title="Start voice assistant"
+        <button id="listen-button" class="listen-button"
           style="background: #28a745; color: white; border: none; cursor: default;">
           <i data-feather="mic" class="icon icon-small"></i> Start
         </button>

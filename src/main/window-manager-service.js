@@ -1,8 +1,11 @@
 /**
  * Window Manager Service
- * Manages native window embedding using Win32 API
+ * Manages native window embedding
+ * Windows: Native Win32 embedding
+ * Linux: Basic process launching (embedding not supported)
  */
 
+const { spawn } = require('child_process');
 const path = require('path');
 
 let nativeAddon = null;
@@ -31,11 +34,16 @@ function loadNativeAddon() {
 function initialize(window) {
   mainWindow = window;
 
-  // Get Electron window's native handle
+  // Linux: No native handle or embedding needed for now
+  if (process.platform === 'linux') {
+    console.log('Window Manager Service initialized (Linux Fallback Mode)');
+    return;
+  }
+
+  // Windows: Get Electron window's native handle
   try {
     const hwnd = mainWindow.getNativeWindowHandle();
     if (Buffer.isBuffer(hwnd)) {
-      // Read as BigInt for 64-bit Windows
       electronWindowHandle = Number(hwnd.readBigUInt64LE(0));
     } else if (typeof hwnd === 'bigint') {
       electronWindowHandle = Number(hwnd);
@@ -43,16 +51,15 @@ function initialize(window) {
       electronWindowHandle = Number(hwnd) || hwnd;
     }
   } catch (e) {
-    console.error('Failed to get window handle:', e);
-    throw new Error('Cannot get Electron window handle. Window embedding requires a valid window handle.');
+    console.warn('Failed to get window handle, embedding may fail:', e);
   }
 
   // Load native addon
   if (!loadNativeAddon()) {
-    throw new Error('Failed to load native window manager addon');
+    console.warn('Failed to load native window manager addon, embedding will be disabled');
   }
 
-  console.log('Window Manager Service initialized');
+  console.log('Window Manager Service initialized (Windows)');
 }
 
 /**
@@ -62,26 +69,32 @@ function initialize(window) {
  * @returns {Promise<Object>} Result with hwnd and processId
  */
 async function launchAndEmbed(appPath, tabId) {
+  // Linux Fallback: Just launch the app via spawn
+  if (process.platform === 'linux') {
+    console.log(`[WindowManager] Launching ${appPath} on Linux...`);
+    const child = spawn(appPath, [], { detached: true, stdio: 'ignore' });
+    child.unref();
+
+    const appName = path.basename(appPath);
+    embeddedWindows.set(tabId, {
+      hwnd: 0,
+      processId: child.pid,
+      appName,
+      visible: true,
+      linux: true
+    });
+
+    return {
+      success: true,
+      hwnd: 0,
+      processId: child.pid,
+      appName
+    };
+  }
+
+  // Windows Implementation
   if (!nativeAddon) {
-    throw new Error('Native addon not loaded');
-  }
-
-  if (!electronWindowHandle) {
-    throw new Error('Electron window handle not available');
-  }
-
-  // Launch application (with timeout handled in C++)
-  const launchResult = nativeAddon.launchApplication(appPath, electronWindowHandle);
-
-  if (!launchResult.success) {
-    // Check for specific error types
-    const errorMsg = launchResult.error || 'Failed to launch application';
-    if (errorMsg.includes('Window not found')) {
-      throw new Error('Application launched but window not found. The app may have a delayed startup or requires user interaction.');
-    } else if (errorMsg.includes('Failed to launch process')) {
-      throw new Error('Failed to start the application. Check if the path is correct and you have permission to run it.');
-    }
-    throw new Error(errorMsg);
+    throw new Error('Native addon not loaded for Windows embedding');
   }
 
   const { processId, processHandle } = launchResult;
@@ -256,13 +269,14 @@ function showTab(tabId) {
  */
 function hideTab(tabId) {
   const windowData = embeddedWindows.get(tabId);
-  if (!windowData) {
-    throw new Error(`Window not found for tab: ${tabId}`);
+  if (!windowData) return { success: false };
+
+  if (windowData.linux) {
+    windowData.visible = false;
+    return { success: true };
   }
 
-  if (!nativeAddon) {
-    throw new Error('Native addon not loaded');
-  }
+  if (!nativeAddon) return { success: false };
 
   const result = nativeAddon.showWindow(windowData.hwnd, false);
   if (result.success) {
@@ -278,34 +292,30 @@ function hideTab(tabId) {
  */
 function closeTab(tabId) {
   const windowData = embeddedWindows.get(tabId);
-  if (!windowData) {
-    return { success: false, error: `Window not found for tab: ${tabId}` };
+  if (!windowData) return { success: false };
+
+  if (windowData.linux) {
+    try {
+      process.kill(windowData.processId);
+    } catch (e) {}
+    embeddedWindows.delete(tabId);
+    return { success: true };
   }
 
   if (!nativeAddon) {
-    return { success: false, error: 'Native addon not loaded' };
+    embeddedWindows.delete(tabId);
+    return { success: false };
   }
 
   try {
-    // Unparent window first
     nativeAddon.unparentWindow(windowData.hwnd);
-  } catch (e) {
-    console.warn('Failed to unparent window:', e);
-  }
+  } catch (e) {}
 
   try {
-    // Terminate process
-    const result = nativeAddon.terminateProcess(windowData.processId);
-    if (!result.success) {
-      console.warn('Failed to terminate process:', result.error);
-    }
-  } catch (e) {
-    console.warn('Error terminating process:', e);
-  }
+    nativeAddon.terminateProcess(windowData.processId);
+  } catch (e) {}
 
-  // Remove from tracking
   embeddedWindows.delete(tabId);
-
   return { success: true };
 }
 
@@ -438,7 +448,7 @@ function monitorProcesses() {
     try {
       // Check if window still exists
       const windowInfo = nativeAddon.getWindowInfo(windowData.hwnd);
-      if (!windowInfo.success) {
+      if (!windowInfo.success && !windowData.linux) {
         // Window disappeared - process likely crashed or app closed itself
         console.warn(`Window for tab ${tabId} disappeared, cleaning up`);
         embeddedWindows.delete(tabId);

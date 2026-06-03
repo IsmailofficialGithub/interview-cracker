@@ -88,22 +88,40 @@ body.screen-sharing input[id*="password"] {
 .header {
   background: #252525;
   border-bottom: 1px solid #333;
-  padding: calc(var(--base-padding) * var(--scale-factor)) calc(var(--base-padding) * 1.33 * var(--scale-factor));
+  padding: calc(var(--base-padding) * 0.7 * var(--scale-factor)) calc(var(--base-padding) * var(--scale-factor));
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
+  gap: 10px;
 }
 
 .header-title {
-  font-size: calc(16px * var(--scale-factor));
+  font-size: calc(15px * var(--scale-factor));
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .header-controls {
   display: flex;
   gap: calc(var(--base-gap) * var(--scale-factor));
   align-items: center;
+  overflow-x: auto;
+  padding-bottom: 5px; /* Space for scrollbar */
+}
+
+.header-controls::-webkit-scrollbar {
+  height: 4px;
+}
+
+.header-controls::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 2px;
+}
+
+.header-controls > * {
+  flex-shrink: 0;
 }
 
 .provider-selector {
@@ -128,6 +146,27 @@ body.screen-sharing input[id*="password"] {
 
 .settings-button:hover {
   background: #3a3a3a;
+}
+
+/* Responsive Header Buttons */
+@media (max-width: 600px) {
+  .settings-button {
+    padding: calc(6px * var(--scale-factor)) calc(8px * var(--scale-factor));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .settings-button span, 
+  .settings-button {
+    /* Hide text nodes inside buttons if any, but since we have text in HTML, 
+       we'll just set font-size to 0 for the button and restore it for the icon */
+    font-size: 0;
+  }
+  
+  .settings-button .icon {
+    margin-right: 0 !important;
+  }
 }
 
 /* General cursor for clickable elements */

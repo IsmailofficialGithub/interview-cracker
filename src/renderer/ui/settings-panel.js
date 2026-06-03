@@ -98,6 +98,8 @@ class SettingsPanel {
 
     // Setup form handlers
     this.setupFormHandlers();
+    this.setupRealTimeListeners();
+    this.refreshMicrophoneChoices();
 
     // Initialize icons
     if (typeof feather !== 'undefined') {
@@ -120,34 +122,37 @@ class SettingsPanel {
    * Render settings content
    */
   renderSettingsContent() {
+    const tabs = ['General', 'AI Accounts', 'Privacy', 'Voice Assistant'];
+    const activeTab = this.activeTab || 'General';
+
     return `
       <div class="settings-tabs">
-        <button class="settings-tab active" data-tab="accounts">AI Accounts</button>
-        <button class="settings-tab" data-tab="privacy">Privacy</button>
-        <button class="settings-tab" data-tab="general">General</button>
+        ${tabs.map(tab => `
+          <button class="settings-tab ${activeTab === tab ? 'active' : ''}" data-tab="${tab}">
+            ${tab}
+          </button>
+        `).join('')}
       </div>
-      
-      <div class="settings-tab-content" id="accounts-tab">
-        ${this.renderAccountsTab()}
-      </div>
-      
-      <div class="settings-tab-content" id="privacy-tab" style="display: none;">
-        ${this.renderPrivacyTab()}
-      </div>
-      
-      <div class="settings-tab-content" id="general-tab" style="display: none;">
-        ${this.renderGeneralTab()}
+      <div id="settings-tab-content">
+        ${this.renderActiveTabContent()}
       </div>
     `;
   }
 
-  /**
-   * Render accounts tab
-   */
+  renderActiveTabContent() {
+    const activeTab = this.activeTab || 'General';
+    switch (activeTab) {
+      case 'General': return this.renderGeneralTab();
+      case 'AI Accounts': return this.renderAccountsTab();
+      case 'Privacy': return this.renderPrivacyTab();
+      case 'Voice Assistant': return this.renderVoiceTab();
+      default: return this.renderGeneralTab();
+    }
+  }
+
   renderAccountsTab() {
     const accounts = this.config.accounts || [];
-
-    let html = `
+    return `
       <div class="accounts-list">
         ${accounts.map((acc, idx) => `
           <div class="account-item">
@@ -155,197 +160,196 @@ class SettingsPanel {
               <strong>${acc.name || 'Untitled Account'}</strong>
               <span class="account-type">${acc.type}</span>
             </div>
-            <button class="account-edit-btn" data-index="${idx}">Edit</button>
-            <button class="account-delete-btn" data-index="${idx}">Delete</button>
+            <div class="account-actions">
+              <button class="account-edit-btn save-btn" style="padding: 4px 10px; font-size: 12px;" data-index="${idx}">Edit</button>
+              <button class="account-delete-btn cancel-btn" style="padding: 4px 10px; font-size: 12px; margin-left: 4px;" data-index="${idx}">Delete</button>
+            </div>
           </div>
         `).join('')}
-        ${accounts.length === 0 ? '<p>No accounts configured. Add one below.</p>' : ''}
+        ${accounts.length === 0 ? '<p style="color: #999; text-align: center; padding: 20px;">No accounts configured. Add one below.</p>' : ''}
       </div>
       
       <button id="add-account-btn" class="add-account-btn">+ Add Account</button>
       
-      <div id="account-form" class="account-form" style="display: none;">
+      <div id="account-form" class="account-form" style="display: none; border-top: 1px solid #333; margin-top: 20px; padding-top: 20px;">
         <h3>Add/Edit Account</h3>
         <form id="account-form-content">
           <input type="hidden" id="account-index" value="-1" />
-          
           <div class="form-group">
-            <label>Account Name</label>
+            <label>Name</label>
             <input type="text" id="account-name" required />
           </div>
-          
           <div class="form-group">
-            <label>Provider Type</label>
+            <label>Type</label>
             <select id="account-type" required>
               <option value="openai">OpenAI</option>
-              <option value="ollama">Ollama (Local)</option>
-              <option value="openai-compatible">OpenAI-Compatible</option>
+              <option value="groq">Groq</option>
+              <option value="ollama">Ollama</option>
             </select>
           </div>
-          
           <div class="form-group" id="api-key-group">
-            <label>API Key <span id="api-key-required" style="color: #ff6b6b; display: none;">*</span></label>
-            <input type="password" id="account-api-key" placeholder="Enter API key" />
-            <small>Leave empty for local providers like Ollama</small>
+            <label>API Key</label>
+            <input type="password" id="account-api-key" placeholder="Enter your key (will be masked)" />
           </div>
-          
           <div class="form-group">
             <label>Model</label>
-            <select id="account-model" required style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 10px; border-radius: 6px; margin-top: 8px;">
-              <option value="">Select a model...</option>
-            </select>
-            <input type="text" id="account-model-custom" placeholder="Or enter custom model name" style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 10px; border-radius: 6px; margin-top: 8px; display: none;" />
+            <input type="text" id="account-model" placeholder="e.g. gpt-4o, llama-3-70b" required />
           </div>
-          
-          <div class="form-group" id="base-url-group">
-            <label>Base URL</label>
-            <input type="text" id="account-base-url" placeholder="Leave empty for defaults" />
-          </div>
-          
           <div class="form-actions">
-            <button type="submit" class="save-btn">Save</button>
-            <button type="button" class="cancel-btn" id="cancel-account-form">Cancel</button>
+            <button type="submit" class="save-btn">Save Account</button>
+            <button type="button" id="cancel-account-form" class="cancel-btn">Cancel</button>
           </div>
         </form>
       </div>
     `;
-
-    return html;
   }
 
-  /**
-   * Render privacy tab
-   */
+  renderVoiceTab() {
+    const settings = this.config.settings || {};
+    return `
+      <div class="form-group">
+        <h3>Microphone</h3>
+        <div class="form-group">
+          <label>Input Device:</label>
+          <select id="voice-device-id">
+            <option value="default">Default Microphone</option>
+          </select>
+          <small id="mic-perm-warning" style="color: #888; display: block; margin-top: 4px;">Permission granted after first assistant start.</small>
+        </div>
+        <div class="form-group" style="padding: 10px; background: #1a1a1a; border-radius: 6px; margin-bottom: 20px;">
+          <label style="display: flex; justify-content: space-between;">
+            <span>Test Microphone</span>
+            <span id="mic-test-status" style="color: #999; font-weight: normal;">Not Testing</span>
+          </label>
+          <div style="display: flex; gap: 10px; align-items: center; margin-top: 8px;">
+             <button id="btn-test-mic" class="save-btn" style="padding: 6px 12px; font-size: 12px; background: #333;">Start Test</button>
+             <div style="flex: 1; height: 10px; background: #000; border-radius: 5px; position: relative; overflow: hidden;">
+                <div id="mic-test-bar" style="height: 100%; width: 0%; background: #4a9eff; transition: width 0.1s ease;"></div>
+             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <h3>Voice Settings</h3>
+        <div class="form-group">
+          <label>Speech Recognition API:</label>
+          <select id="voice-api">
+            <option value="groq-whisper" ${settings.voiceAPI === 'groq-whisper' ? 'selected' : ''}>Groq Whisper</option>
+            <option value="openai-whisper" ${settings.voiceAPI === 'openai-whisper' ? 'selected' : ''}>OpenAI Whisper</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Whisper Model:</label>
+          <select id="whisper-model">
+            <option value="whisper-large-v3-turbo" ${settings.whisperModel === 'whisper-large-v3-turbo' ? 'selected' : ''}>whisper-large-v3-turbo</option>
+            <option value="whisper-1" ${settings.whisperModel === 'whisper-1' ? 'selected' : ''}>whisper-1</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label style="display: flex; justify-content: space-between;">
+            <span>Sensitivity</span>
+            <span id="sensitivity-value">${settings.voiceSensitivity || -85}dB</span>
+          </label>
+          <input type="range" id="voice-sensitivity" min="-95" max="-30" value="${settings.voiceSensitivity || -85}" />
+        </div>
+        <div class="form-group">
+          <label style="display: flex; justify-content: space-between;">
+            <span>Silence Threshold (ms)</span>
+            <span id="silence-threshold-value">${settings.voiceSilenceThreshold || 250}ms</span>
+          </label>
+          <input type="range" id="voice-silence-threshold" min="50" max="2000" step="50" value="${settings.voiceSilenceThreshold || 250}" />
+        </div>
+        
+        <div class="form-group" style="padding: 10px; background: #1a1a1a; border-radius: 6px;">
+          <label>AI Voice Output</label>
+          <div style="margin-top: 8px;">
+             <button id="btn-test-voice" class="save-btn" style="padding: 6px 12px; font-size: 12px; background: #333;">Test AI Voice</button>
+             <small style="color: #888; font-size: 11px; margin-left: 10px;">Ensures your speakers are working.</small>
+          </div>
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button id="save-voice-settings" class="save-btn">Save Voice Settings</button>
+      </div>
+    `;
+  }
+
   renderPrivacyTab() {
     const settings = this.config.settings || {};
-
     return `
-      <div class="settings-section">
-        <h3>Auto-Lock</h3>
-        <div class="setting-item">
-          <label>
-            <input type="checkbox" id="auto-lock" ${settings.autoLock !== false ? 'checked' : ''} />
-            Enable auto-lock on idle
-          </label>
-        </div>
-        <div class="setting-item">
-          <label>
-            Auto-lock after (minutes):
-            <input type="number" id="auto-lock-minutes" value="${settings.autoLockMinutes || 15}" min="1" max="60" />
-          </label>
-        </div>
-      </div>
-      
-      <div class="settings-section">
+      <div class="form-group">
         <h3>Privacy</h3>
-        <div class="setting-item">
-          <label>
-            <input type="checkbox" id="auto-blur" ${settings.autoBlur ? 'checked' : ''} />
-            Blur chat when window loses focus
-          </label>
+        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="auto-blur" style="width: auto;" ${settings.autoBlur ? 'checked' : ''} />
+          <label style="margin-bottom: 0;">Blur chat when window loses focus</label>
         </div>
-        <div class="setting-item">
-          <label>
-            Message retention (days, 0 = never delete):
-            <input type="number" id="message-retention" value="${settings.messageRetentionDays || 0}" min="0" />
-          </label>
+        <div class="form-group">
+          <label>Auto-lock after (minutes):</label>
+          <input type="number" id="auto-lock-minutes" value="${settings.autoLockMinutes || 15}" min="1" />
         </div>
-      </div>
-
-      <div class="settings-section">
-        <h3>Shortcuts</h3>
-        <div class="setting-item">
-          <label>
-            Hide/Show App Shortcut:
-            <input type="text" id="hide-shortcut" value="${settings.hideShortcut || 'Ctrl+Alt+H'}" placeholder="e.g. Ctrl+Alt+H" />
-          </label>
-        </div>
-        <div class="setting-item">
-          <label>
-            Ghost Type Shortcut (Simulate Human Typing):
-            <input type="text" id="ghost-shortcut" value="${settings.ghostShortcut || 'Ctrl+Alt+V'}" placeholder="e.g. Ctrl+Alt+V" />
-          </label>
-        </div>
-        <div class="setting-item" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
-           <label style="display: block; margin-bottom: 5px;">Typing Speed (WPM):</label>
-           <div style="display: flex; align-items: center; gap: 10px;">
-             <input type="number" id="ghost-wpm" value="${settings.ghostWpm || 60}" min="10" max="200" style="width: 80px;" />
-             <small style="color: #888;">(Higher is faster)</small>
-           </div>
-        </div>
-        <div class="setting-item">
-           <label style="display: block; margin-bottom: 5px;">Mistake Chance (%):</label>
-           <div style="display: flex; align-items: center; gap: 10px;">
-             <input type="number" id="ghost-mistake-chance" value="${settings.ghostMistakeChance !== undefined ? settings.ghostMistakeChance : 5}" min="0" max="100" style="width: 80px;" />
-             <small style="color: #888;">(0 = Perfect typing)</small>
-           </div>
-        </div>
-        <div class="setting-item">
-           <label style="display: block; margin-bottom: 5px;">Max Consecutive Mistakes:</label>
-           <div style="display: flex; align-items: center; gap: 10px;">
-             <input type="number" id="ghost-max-mistakes" value="${settings.ghostMaxMistakes || 1}" min="1" max="5" style="width: 80px;" />
-             <small style="color: #888;">(Max wrong chars at once)</small>
-           </div>
-        </div>
-
-      </div>
-
-      <div class="settings-section">
-        <h3>Voice Input (Speech-to-Text)</h3>
-        <div class="setting-item" style="margin-bottom: 16px;">
-          <label style="display: flex; align-items: center; gap: 8px;">
-            <input type="checkbox" id="voice-enabled" ${settings.voiceEnabled !== false ? 'checked' : ''} />
-            Enable voice input
-          </label>
-          <small style="display: block; margin-top: 4px; color: #999; font-size: 12px;">
-            Click the Listen button to use voice input
-          </small>
-        </div>
-        <div class="setting-item" style="margin-bottom: 16px;">
-          <label style="display: block; margin-bottom: 8px;">
-            Speech Recognition API:
-          </label>
-          <select id="voice-api" style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 6px; font-size: 14px;">
-            <option value="groq-whisper" ${!settings.voiceAPI || settings.voiceAPI === 'groq-whisper' ? 'selected' : ''}>Groq Whisper (Recommended - Fast & Reliable)</option>
-            <option value="openai-whisper" ${settings.voiceAPI === 'openai-whisper' ? 'selected' : ''}>OpenAI Whisper (whisper-1)</option>
-            <option value="web-speech" ${settings.voiceAPI === 'web-speech' ? 'selected' : ''}>Web Speech API (Browser - May be blocked)</option>
-          </select>
-          <small style="display: block; margin-top: 4px; color: #999; font-size: 12px;">
-            Web Speech: Free but requires internet. OpenAI/Groq: Requires API key but more accurate.
-          </small>
-        </div>
-        <div class="setting-item" style="margin-bottom: 16px;">
-          <label style="display: block; margin-bottom: 8px;">
-            Whisper Model (for Groq/OpenAI):
-          </label>
-          <select id="whisper-model" style="width: 100%; background: #252525; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 6px; font-size: 14px;">
-            <option value="whisper-large-v3-turbo" ${settings.whisperModel === 'whisper-large-v3-turbo' ? 'selected' : ''}>Groq: whisper-large-v3-turbo (Recommended - Fast)</option>
-            <option value="whisper-large-v3" ${settings.whisperModel === 'whisper-large-v3' ? 'selected' : ''}>Groq: whisper-large-v3</option>
-            <option value="whisper-1" ${settings.whisperModel === 'whisper-1' ? 'selected' : ''}>OpenAI: whisper-1</option>
-          </select>
-          <small style="display: block; margin-top: 4px; color: #999; font-size: 12px;">
-            Select the model based on your chosen API above
-          </small>
+        <div class="form-group">
+          <label>Message retention (days, 0 = never delete):</label>
+          <input type="number" id="message-retention" value="${settings.messageRetentionDays || 0}" min="0" />
         </div>
       </div>
-      
       <div class="settings-actions">
-        <button id="save-privacy-settings" class="save-btn">Save Settings</button>
+        <button id="save-privacy-settings" class="save-btn">Save Privacy Settings</button>
       </div>
     `;
   }
 
-  /**
-   * Render general tab
-   */
   renderGeneralTab() {
+    const settings = this.config.settings || {};
     return `
-      <div class="settings-section">
+      <div class="form-group">
+        <h3>Shortcuts</h3>
+        <div class="form-group">
+          <label>Hide/Show App Shortcut:</label>
+          <input type="text" id="hide-shortcut" value="${settings.hideShortcut || 'Ctrl+Alt+H'}" />
+        </div>
+        <div class="form-group">
+          <label>Ghost Type Shortcut (Paste):</label>
+          <input type="text" id="ghost-shortcut" value="${settings.ghostShortcut || 'Ctrl+Alt+V'}" />
+        </div>
+      </div>
+      <div class="form-group">
         <h3>About</h3>
-        <p>Private AI Chat v1.0.0</p>
-        <p>Secure, encrypted AI chat application</p>
+        <p style="color: #999; font-size: 14px;">Noctisai v1.0.1</p>
+        <p style="color: #777; font-size: 12px;">Secure local AI interviewer helper.</p>
+      </div>
+      <div class="settings-actions">
+        <button id="save-general-settings" class="save-btn">Save General Settings</button>
       </div>
     `;
+  }
+
+  async refreshMicrophoneChoices() {
+    const deviceSelect = document.getElementById('voice-device-id');
+    if (!deviceSelect) return;
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter(d => d.kind === 'audioinput');
+      console.log('[SettingsPanel] Mics found:', mics.length);
+      
+      const voiceSettings = this.config?.settings || {};
+      const currentValue = deviceSelect.value || voiceSettings.voiceDeviceId || 'default';
+      
+      let html = mics.map(m => `
+        <option value="${m.deviceId}" ${m.deviceId === currentValue ? 'selected' : ''}>
+          ${m.label || (m.deviceId === 'default' ? 'System Default' : 'Microphone ' + m.deviceId.slice(0, 5))}
+        </option>
+      `).join('');
+      
+      if (mics.length === 0 || !html) {
+        html = `<option value="default" ${currentValue === 'default' ? 'selected' : ''}>Default Microphone</option>`;
+      }
+      
+      deviceSelect.innerHTML = html;
+    } catch (err) {
+      console.error('Failed to enumerate microphones:', err);
+    }
   }
 
   /**
@@ -356,227 +360,143 @@ class SettingsPanel {
     document.querySelectorAll('.settings-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         const tabName = tab.dataset.tab;
-
-        // Update active tab
+        
+        // Update state
         document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
-
-        // Show corresponding content
-        document.querySelectorAll('.settings-tab-content').forEach(content => {
-          content.style.display = 'none';
-        });
+        
+        document.querySelectorAll('.settings-tab-content').forEach(c => c.style.display = 'none');
         document.getElementById(`${tabName}-tab`).style.display = 'block';
+
+        if (tabName === 'voice') {
+          this.refreshMicrophoneChoices();
+        }
       });
     });
 
-    // Provider type change
-    const accountType = document.getElementById('account-type');
-    if (accountType) {
-      const updateFormForProviderType = () => {
-        const type = accountType.value;
-        const apiKeyGroup = document.getElementById('api-key-group');
-        const baseUrlGroup = document.getElementById('base-url-group');
-        const apiKeyRequired = document.getElementById('api-key-required');
-        const apiKeyInput = document.getElementById('account-api-key');
+    // Save buttons
+    document.getElementById('save-general-settings')?.addEventListener('click', () => this.savePrivacySettings());
+    document.getElementById('save-privacy-settings')?.addEventListener('click', () => this.savePrivacySettings());
+    document.getElementById('save-voice-settings')?.addEventListener('click', () => this.saveVoiceSettings());
 
-        if (type === 'ollama') {
-          apiKeyGroup.style.display = 'none';
-          baseUrlGroup.style.display = 'block';
-          const baseUrlInput = document.getElementById('account-base-url');
-          if (baseUrlInput) baseUrlInput.placeholder = 'http://localhost:11434';
-          if (apiKeyRequired) apiKeyRequired.style.display = 'none';
-          if (apiKeyInput) apiKeyInput.removeAttribute('required');
-        } else if (type === 'openai') {
-          apiKeyGroup.style.display = 'block';
-          baseUrlGroup.style.display = 'none';
-          if (apiKeyRequired) apiKeyRequired.style.display = 'inline';
-          if (apiKeyInput) {
-            apiKeyInput.setAttribute('required', 'required');
-            // Ensure API key input is enabled and accessible
-            apiKeyInput.disabled = false;
-            apiKeyInput.readOnly = false;
-            apiKeyInput.style.pointerEvents = 'auto';
-            apiKeyInput.removeAttribute('disabled');
-            apiKeyInput.removeAttribute('readonly');
-          }
-        } else {
-          apiKeyGroup.style.display = 'block';
-          baseUrlGroup.style.display = 'block';
-          if (apiKeyRequired) apiKeyRequired.style.display = 'none';
-          if (apiKeyInput) {
-            apiKeyInput.removeAttribute('required');
-            // Ensure API key input is enabled
-            apiKeyInput.disabled = false;
-            apiKeyInput.readOnly = false;
-            apiKeyInput.style.pointerEvents = 'auto';
-            apiKeyInput.removeAttribute('disabled');
-            apiKeyInput.removeAttribute('readonly');
-        }
-        }
-        
-        // Update model dropdown when provider type changes
-        this.updateModelDropdown(type);
-      };
-
-      accountType.addEventListener('change', updateFormForProviderType);
-      // Initialize on load
-      setTimeout(() => {
-        updateFormForProviderType();
-      }, 100);
-    }
+    // Mic Test Logic
+    let micTestStream = null;
+    let micTestInterval = null;
+    const testMicBtn = document.getElementById('btn-test-mic');
     
-    // Edit/Delete button handlers
-    document.querySelectorAll('.account-edit-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const index = parseInt(btn.dataset.index);
-        const account = this.config.accounts[index];
-        if (!account) return;
+    testMicBtn?.addEventListener('click', async (e) => {
+        const btn = e.target;
+        const bar = document.getElementById('mic-test-bar');
+        const status = document.getElementById('mic-test-status');
 
-        const accountForm = document.getElementById('account-form');
-        const nameInput = document.getElementById('account-name');
-        const typeInput = document.getElementById('account-type');
-        const apiKeyInput = document.getElementById('account-api-key');
-        const baseURLInput = document.getElementById('account-base-url');
-        const indexInput = document.getElementById('account-index');
-        const modelSelect = document.getElementById('account-model');
-        const modelCustomInput = document.getElementById('account-model-custom');
-
-        if (accountForm) {
-          accountForm.style.display = 'block';
+        if (micTestStream) {
+            micTestStream.getTracks().forEach(t => t.stop());
+            micTestStream = null;
+            if (micTestInterval) clearInterval(micTestInterval);
+            if (bar) bar.style.width = '0%';
+            if (status) status.innerText = 'Not Testing';
+            btn.innerText = 'Start Test';
+            return;
         }
 
-        // Populate form with existing account data
-        if (indexInput) indexInput.value = index;
-        if (nameInput) nameInput.value = account.name || '';
-        if (typeInput) typeInput.value = account.type || 'openai';
-        if (apiKeyInput) {
-          apiKeyInput.value = ''; // Don't show existing key for security
-          apiKeyInput.disabled = false;
-          apiKeyInput.readOnly = false;
-          apiKeyInput.style.pointerEvents = 'auto';
+        try {
+            const deviceId = document.getElementById('voice-device-id').value;
+            micTestStream = await navigator.mediaDevices.getUserMedia({
+                audio: { 
+                  deviceId: deviceId === 'default' ? undefined : { exact: deviceId },
+                  autoGainControl: true
+                }
+            });
+            
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') await audioCtx.resume();
+            
+            const analyser = audioCtx.createAnalyser();
+            const source = audioCtx.createMediaStreamSource(micTestStream);
+            source.connect(analyser);
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            btn.innerText = 'Stop Test';
+            if (status) status.innerText = 'Testing...';
+
+            micTestInterval = setInterval(() => {
+                analyser.getByteFrequencyData(dataArray);
+                let max = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                  if (dataArray[i] > max) max = dataArray[i];
+                }
+                // Calculate a more sensitive percentage (max is 0-255)
+                // Using 100 as the 'loud' marker for better visual feedback with quiet mics
+                const volume = Math.min(100, (max / 100) * 100);
+                if (bar) bar.style.width = volume + '%';
+            }, 30);
+        } catch (err) {
+            console.error('Test failed:', err);
+            alert('Mic error: ' + err.message);
         }
-        if (baseURLInput) baseURLInput.value = account.baseURL || '';
-
-        // Update model dropdown
-        const providerType = account.type || 'openai';
-        this.updateModelDropdown(providerType);
-
-        // Set model value
-        setTimeout(() => {
-          const savedModel = account.model || '';
-          if (modelSelect) {
-            const optionExists = Array.from(modelSelect.options).some(opt => opt.value === savedModel);
-            if (optionExists) {
-              modelSelect.value = savedModel;
-              if (modelCustomInput) {
-                modelCustomInput.style.display = 'none';
-                modelCustomInput.value = '';
-              }
-            } else {
-              modelSelect.value = '__custom__';
-              if (modelCustomInput) {
-                modelCustomInput.value = savedModel;
-                modelCustomInput.style.display = 'block';
-              }
-            }
-          }
-          // Trigger type change to update visibility
-          if (typeInput) {
-            typeInput.dispatchEvent(new Event('change'));
-          }
-        }, 100);
-      });
     });
 
-    document.querySelectorAll('.account-delete-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const index = parseInt(btn.dataset.index);
-        if (confirm('Are you sure you want to delete this account?')) {
-          if (this.config.accounts && index >= 0 && index < this.config.accounts.length) {
-            this.config.accounts.splice(index, 1);
-            await this.saveConfig();
-            await this.loadConfig();
-            this.hide();
-            this.show();
-          }
-        }
-      });
+    // Voice Test Logic
+    document.getElementById('btn-test-voice')?.addEventListener('click', () => {
+        if (!window.speechSynthesis) return alert('No TTS support');
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance("Microphone check, one two. This is the Voice Assistant testing your audio output.");
+        window.speechSynthesis.speak(utterance);
     });
 
-    // Initialize model dropdown when form is shown
-    const addAccountBtn = document.getElementById('add-account-btn');
-    if (addAccountBtn) {
-      addAccountBtn.addEventListener('click', () => {
-        const accountForm = document.getElementById('account-form');
-        const apiKeyInput = document.getElementById('account-api-key');
-        const nameInput = document.getElementById('account-name');
-        const baseUrlInput = document.getElementById('account-base-url');
-        
-        if (accountForm) {
-          accountForm.style.display = 'block';
-        }
-        
-        // Clear and enable all inputs
-        if (document.getElementById('account-index')) {
+    // Sensitivity/Silence real-time labels
+    const sensitivity = document.getElementById('voice-sensitivity');
+    const silence = document.getElementById('voice-silence-threshold');
+    
+    sensitivity?.addEventListener('input', (e) => {
+        const el = document.getElementById('sensitivity-value');
+        if (el) el.innerText = e.target.value + 'dB';
+    });
+    silence?.addEventListener('input', (e) => {
+        const el = document.getElementById('silence-threshold-value');
+        if (el) el.innerText = e.target.value + 'ms';
+    });
+    
+    // AI Accounts logic (delegated)
+    document.getElementById('add-account-btn')?.addEventListener('click', () => {
+        document.getElementById('account-form').style.display = 'block';
         document.getElementById('account-index').value = '-1';
-        }
-        if (nameInput) {
-          nameInput.value = '';
-          nameInput.disabled = false;
-          nameInput.readOnly = false;
-          nameInput.style.pointerEvents = 'auto';
-        }
-        if (apiKeyInput) {
-          apiKeyInput.value = '';
-          apiKeyInput.disabled = false;
-          apiKeyInput.readOnly = false;
-          apiKeyInput.style.pointerEvents = 'auto';
-          apiKeyInput.removeAttribute('disabled');
-          apiKeyInput.removeAttribute('readonly');
-        }
-        if (baseUrlInput) {
-          baseUrlInput.value = '';
-          baseUrlInput.disabled = false;
-          baseUrlInput.readOnly = false;
-          baseUrlInput.style.pointerEvents = 'auto';
-        }
-        
-        // Initialize model dropdown
-        const type = document.getElementById('account-type')?.value || 'openai';
-        setTimeout(() => {
-          this.updateModelDropdown(type);
-          // Focus on API key input after a short delay
-          if (apiKeyInput) {
-            setTimeout(() => apiKeyInput.focus(), 100);
-          }
-        }, 50);
-      });
-    }
+        document.getElementById('account-name').value = '';
+    });
 
-    // Cancel account form
-    const cancelBtn = document.getElementById('cancel-account-form');
-    if (cancelBtn) {
-      cancelBtn.addEventListener('click', () => {
+    document.getElementById('cancel-account-form')?.addEventListener('click', () => {
         document.getElementById('account-form').style.display = 'none';
-      });
-    }
+    });
 
-    // Account form submit (will be handled by save handler)
-    const accountForm = document.getElementById('account-form-content');
-    if (accountForm) {
-      accountForm.addEventListener('submit', async (e) => {
+    document.getElementById('account-form-content')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         await this.saveAccount();
-      });
-    }
+    });
 
-    // Save privacy settings
-    const savePrivacyBtn = document.getElementById('save-privacy-settings');
-    if (savePrivacyBtn) {
-      savePrivacyBtn.addEventListener('click', async () => {
-        await this.savePrivacySettings();
-      });
-    }
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('account-edit-btn')) {
+            const idx = e.target.dataset.index;
+            const acc = this.config.accounts[idx];
+            document.getElementById('account-index').value = idx;
+            document.getElementById('account-name').value = acc.name || '';
+            document.getElementById('account-type').value = acc.type || 'openai';
+            document.getElementById('account-model').value = acc.model || '';
+            document.getElementById('account-form').style.display = 'block';
+        }
+        if (e.target.classList.contains('account-delete-btn')) {
+            if (confirm('Delete this account?')) {
+                this.config.accounts.splice(e.target.dataset.index, 1);
+                this.saveConfig().then(() => { this.hide(); this.show(); });
+            }
+        }
+    });
+
+    // Provider type change in form
+    document.getElementById('account-type')?.addEventListener('change', (e) => {
+        this.updateModelDropdown(e.target.value);
+    });
   }
 
   /**
@@ -738,15 +658,25 @@ class SettingsPanel {
   /**
    * Save privacy settings
    */
+  /**
+   * Save privacy settings
+   */
   async savePrivacySettings() {
     if (!this.config.settings) {
       this.config.settings = {};
     }
 
-    this.config.settings.autoLock = document.getElementById('auto-lock').checked;
-    this.config.settings.autoLockMinutes = parseInt(document.getElementById('auto-lock-minutes').value);
-    this.config.settings.autoBlur = document.getElementById('auto-blur').checked;
-    this.config.settings.messageRetentionDays = parseInt(document.getElementById('message-retention').value);
+    const autoLock = document.getElementById('auto-lock');
+    if (autoLock) this.config.settings.autoLock = autoLock.checked;
+
+    const autoLockMinutes = document.getElementById('auto-lock-minutes');
+    if (autoLockMinutes) this.config.settings.autoLockMinutes = parseInt(autoLockMinutes.value);
+
+    const autoBlur = document.getElementById('auto-blur');
+    if (autoBlur) this.config.settings.autoBlur = autoBlur.checked;
+
+    const messageRetention = document.getElementById('message-retention');
+    if (messageRetention) this.config.settings.messageRetentionDays = parseInt(messageRetention.value);
 
     // Save shortcuts
     const shortcutInput = document.getElementById('hide-shortcut');
@@ -754,7 +684,6 @@ class SettingsPanel {
       const newShortcut = shortcutInput.value.trim();
       if (newShortcut && this.config.settings.hideShortcut !== newShortcut) {
         this.config.settings.hideShortcut = newShortcut;
-        // Update main process
         await window.electronAPI.updateShortcut(newShortcut);
       }
     }
@@ -768,34 +697,114 @@ class SettingsPanel {
       }
     }
 
-    if (ghostWpmInput) {
-      const newGhostWpm = parseInt(ghostWpmInput.value);
-      if (newGhostWpm && this.config.settings.ghostWpm !== newGhostWpm) {
-        this.config.settings.ghostWpm = newGhostWpm;
-        await window.electronAPI.updateGhostWpm(newGhostWpm);
-      }
+    await this.saveConfig();
+    alert('Privacy settings saved');
+  }
+
+  /**
+   * Save voice settings
+   */
+  async saveVoiceSettings() {
+    if (!this.config.settings) {
+      this.config.settings = {};
     }
 
-    // Save voice settings (if they exist in the UI)
     const voiceEnabledCheckbox = document.getElementById('voice-enabled');
     if (voiceEnabledCheckbox) {
       this.config.settings.voiceEnabled = voiceEnabledCheckbox.checked;
     }
 
-    const voiceAPI = document.getElementById('voice-api');
-    if (voiceAPI) {
-      this.config.settings.voiceAPI = voiceAPI.value;
-      console.log('[SettingsPanel] Saving voiceAPI setting:', voiceAPI.value);
+    const voiceAPIEl = document.getElementById('voice-api');
+    if (voiceAPIEl) {
+      this.config.settings.voiceAPI = voiceAPIEl.value;
     }
 
-    const whisperModel = document.getElementById('whisper-model');
-    if (whisperModel) {
-      this.config.settings.whisperModel = whisperModel.value;
+    const whisperModelEl = document.getElementById('whisper-model');
+    if (whisperModelEl) {
+      this.config.settings.whisperModel = whisperModelEl.value;
+    }
+
+    const voiceSensitivity = document.getElementById('voice-sensitivity');
+    if (voiceSensitivity) {
+      this.config.settings.voiceSensitivity = parseInt(voiceSensitivity.value);
+    }
+
+    const voiceSilenceThreshold = document.getElementById('voice-silence-threshold');
+    if (voiceSilenceThreshold) {
+      this.config.settings.voiceSilenceThreshold = parseInt(voiceSilenceThreshold.value);
+    }
+    
+    const voiceDeviceId = document.getElementById('voice-device-id');
+    if (voiceDeviceId) {
+      this.config.settings.voiceDeviceId = voiceDeviceId.value;
     }
 
     await this.saveConfig();
-    alert('Settings saved');
+    alert('Voice settings saved');
+    this.refreshMicrophoneChoices();
   }
+
+
+
+  /**
+   * Setup UI events for real-time updates (like range values)
+   */
+  setupRealTimeListeners() {
+    const sensitivityRange = document.getElementById('voice-sensitivity');
+    const sensitivityLabel = document.getElementById('sensitivity-value');
+    if (sensitivityRange && sensitivityLabel) {
+      sensitivityRange.oninput = (e) => {
+        sensitivityLabel.innerText = `${e.target.value}dB`;
+      };
+    }
+
+    const silenceRange = document.getElementById('voice-silence-threshold');
+    const silenceLabel = document.getElementById('silence-threshold-value');
+    if (silenceRange && silenceLabel) {
+      silenceRange.oninput = (e) => {
+        silenceLabel.innerText = `${e.target.value}ms`;
+      };
+    }
+  }
+
+  /**
+   * Refresh microphone choices (Speech-to-Text)
+   */
+  async refreshMicrophoneChoices() {
+    const micSelect = document.getElementById('voice-device-id');
+    const warning = document.getElementById('mic-perm-warning');
+    if (!micSelect) return;
+
+    try {
+      // Check for available devices
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(device => device.kind === 'audioinput');
+
+      // Clear existing options except default
+      micSelect.innerHTML = '<option value="default">Default System Microphone</option>';
+
+      // Only show full labels if permission was already granted previously
+      // Note: Labels might be empty until first getUserMedia call in some browsers
+      audioInputs.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.text = device.label || `Microphone ${index + 1} (${device.deviceId.substring(0, 5)}...)`;
+        micSelect.appendChild(option);
+      });
+
+      // Restore saved selection
+      const savedDeviceId = this.config?.settings?.voiceDeviceId || 'default';
+      micSelect.value = savedDeviceId;
+
+      if (audioInputs.some(input => !input.label)) {
+        if (warning) warning.innerText = 'Labels missing. Start the Assistant once to grant mic permissions, then re-open settings to select specific devices.';
+      }
+
+    } catch (error) {
+      console.error('Failed to enumerate audio devices:', error);
+    }
+  }
+
 
 
 

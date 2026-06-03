@@ -4,6 +4,8 @@
  */
 
 const path = require('path');
+const fs = require('fs').promises;
+const os = require('os');
 
 let nativeAddon = null;
 let cachedApps = null;
@@ -26,10 +28,63 @@ function loadNativeAddon() {
  * Initialize app discovery service
  */
 function initialize() {
-  if (!loadNativeAddon()) {
-    throw new Error('Failed to load native app discovery addon');
+  if (process.platform === 'win32') {
+    if (!loadNativeAddon()) {
+      console.warn('Failed to load native app discovery addon, app discovery will be limited');
+    }
   }
-  console.log('App Discovery Service initialized');
+  console.log(`App Discovery Service initialized for ${process.platform}`);
+}
+
+/**
+ * Discover Linux applications by scanning .desktop files
+ * @returns {Promise<Array>} Array of app objects
+ */
+async function discoverLinuxApps() {
+  const apps = [];
+  const searchPaths = [
+    '/usr/share/applications',
+    path.join(os.homedir(), '.local/share/applications')
+  ];
+
+  for (const searchPath of searchPaths) {
+    try {
+      const files = await fs.readdir(searchPath);
+      for (const file of files) {
+        if (file.endsWith('.desktop')) {
+          try {
+            const fullPath = path.join(searchPath, file);
+            const content = await fs.readFile(fullPath, 'utf8');
+            
+            const nameMatch = content.match(/^Name=(.*)$/m);
+            const execMatch = content.match(/^Exec=(.*)$/m);
+            const iconMatch = content.match(/^Icon=(.*)$/m);
+            
+            if (nameMatch && execMatch) {
+              const name = nameMatch[1].trim();
+              let exec = execMatch[1].split(' ')[0].trim(); // Remove arguments like %U
+              // Remove quotes if present
+              if (exec.startsWith('"') && exec.endsWith('"')) exec = exec.slice(1, -1);
+              
+              const icon = iconMatch ? iconMatch[1].trim() : 'application-x-executable';
+              
+              apps.push({
+                id: `linux_${path.basename(file, '.desktop')}`,
+                name: name,
+                path: exec,
+                icon: icon
+              });
+            }
+          } catch (err) {
+            // Skip problematic files
+          }
+        }
+      }
+    } catch (err) {
+      // Directory might not exist
+    }
+  }
+  return apps;
 }
 
 /**
@@ -37,8 +92,19 @@ function initialize() {
  * @returns {Promise<Array>} Array of app objects
  */
 async function discoverApps() {
+  // Linux implementation (JS-based)
+  if (process.platform === 'linux') {
+    const apps = await discoverLinuxApps();
+    apps.sort((a, b) => a.name.localeCompare(b.name));
+    cachedApps = apps;
+    lastScanTime = Date.now();
+    return apps;
+  }
+
+  // Windows implementation (Native-based)
   if (!nativeAddon) {
-    throw new Error('Native addon not loaded');
+    console.warn('Native addon not loaded for app discovery');
+    return [];
   }
   
   try {

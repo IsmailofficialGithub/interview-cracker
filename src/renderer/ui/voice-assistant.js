@@ -64,10 +64,10 @@ class VoiceAssistant {
     this.voiceActivityCheckInterval = null;
     this.isSpeaking = false;
     this.silenceStartTime = null;
-    this.silenceDurationThreshold = 400; // Reduced from 800ms for much faster response
-    this.speechThreshold = -50;  // Lowered from -40 to detect quieter system audio
-    this.silenceThreshold = -58; // Increased from -65 so slight background noise counts as silence
-    this.minRecordingDuration = 200; // Reduced from 500ms to allow faster turnaround
+    this.silenceDurationThreshold = 600; // Increased to 600ms for more natural pauses
+    this.speechThreshold = -70;  // EXTREMELY low to detect very quiet microphones
+    this.silenceThreshold = -80; // Even lower to distinguish from background noise
+    this.minRecordingDuration = 50; // Minimal buffer for ultra-fast reaction
     this.maxRecordingDuration = 30000; // Maximum 30 seconds of recording
     this.recordingStartTime = null;
     this.accumulatedChunks = []; // Store chunks while speaking
@@ -109,23 +109,20 @@ class VoiceAssistant {
         const settings = this.config.settings || {};
         const voiceAPI = settings.voiceAPI || 'groq-whisper'; // Default to Groq Whisper
 
-        // Update silence thresholds from user settings
-        if (settings.voiceSilenceThreshold) {
-          this.silenceDurationThreshold = settings.voiceSilenceThreshold;
-        } else {
-          this.silenceDurationThreshold = 400; // Default
-        }
+        // Update silence duration threshold from user settings
+        this.silenceDurationThreshold = settings.voiceSilenceThreshold || 600;
 
-        // Sensitivity (dB) mapping
-        if (settings.voiceSensitivity) {
-          this.silenceThreshold = settings.voiceSensitivity;
-        } else {
-          this.silenceThreshold = -52; // Default more lenient value
-        }
-        
-        console.log('[VoiceAssistant] VAD Config:', {
+        // FIXED: Use hardcoded reliable thresholds.
+        // The settings slider was saving wrong values (e.g. -37 dB which is WAY too high).
+        // A typical mic at normal speaking volume registers around -30 to -50 dB peak.
+        // We set the silence floor at -60 dB to catch quiet mics reliably.
+        this.silenceThreshold = -60;  // Below this = silence
+        this.speechThreshold = -50;  // Above this = speech detected
+
+        console.log('[VoiceAssistant] VAD Config Loaded:', {
           duration: `${this.silenceDurationThreshold}ms`,
-          dbThreshold: `${this.silenceThreshold}dB`
+          silenceDbThreshold: `${this.silenceThreshold}dB`,
+          speechDbThreshold: `${this.speechThreshold}dB`
         });
 
         console.log('[VoiceAssistant] Voice API setting:', voiceAPI);
@@ -416,7 +413,7 @@ class VoiceAssistant {
         <i data-feather="volume-2" class="icon"></i> YOURS
       </span>
     `;
-    modeToggle.title = 'Toggle between MINE MODE (Microphone) and YOURS MODE (System Audio)';
+    modeToggle.title="";
     return modeToggle;
   }
 
@@ -429,11 +426,15 @@ class VoiceAssistant {
     if (this.isActive) {
       const iconName = this.mode === 'mine' ? 'mic' : 'volume-2';
       this.statusIndicator.className = 'voice-assistant-status active';
-      
+
       // Select appropriate status text
       let statusText = 'Listening...';
       if (this.isProcessing) {
         statusText = this.responseBuffer ? 'Responding...' : 'Thinking...';
+      } else if (this.isSpeaking) {
+        statusText = '<span style="color: #4aff4a; animation: pulse 0.5s infinite;">Hearing you...</span>';
+      } else if (this._hasAudioSinceLastLoop) {
+        statusText = '<span style="color: #88ff88;">Hearing noise...</span>';
       }
 
       let content = `
@@ -451,7 +452,7 @@ class VoiceAssistant {
       }
 
       this.statusIndicator.innerHTML = content;
-      
+
       // Re-initialize icons
       if (typeof feather !== 'undefined') {
         feather.replace();
@@ -553,6 +554,19 @@ class VoiceAssistant {
       this.voiceActivityCheckInterval = null;
     }
 
+    // Clear chunk auto-stop timer
+    if (this._chunkTimer) {
+      clearTimeout(this._chunkTimer);
+      this._chunkTimer = null;
+    }
+
+    // Clear YOURS mode silence timer
+    if (this._yoursSilenceTimer) {
+      clearTimeout(this._yoursSilenceTimer);
+      this._yoursSilenceTimer = null;
+    }
+    this._yoursRecording = false;
+
     // Stop recording
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
@@ -604,26 +618,29 @@ class VoiceAssistant {
       // Ensure window stays on top and focused before requesting permissions
       await this.ensureWindowOnTop();
 
-      // Request microphone access ONLY - explicitly exclude system audio
+      // Use user-selected device if available
+      const deviceId = this.config?.settings?.voiceDeviceId || 'default';
+      console.log(`[VoiceAssistant] Requesting microphone device: ${deviceId}`);
+
       this.audioStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          deviceId: deviceId !== 'default' ? { exact: deviceId } : undefined,
+          // Disable browser audio processing - Whisper handles noise filtering itself.
+          // noiseSuppression can suppress quiet voices, treating them as background noise.
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          sampleRate: 16000,  // Whisper works best at 16kHz
         },
         video: false
       });
 
       // Verify we got microphone tracks only
+      // Log audio tracks for debugging
       const audioTracks = this.audioStream.getAudioTracks();
-      console.log('MINE mode: Audio tracks:', audioTracks.length);
+      console.log('MINE mode: Audio tracks found:', audioTracks.length);
       audioTracks.forEach(track => {
-        if (track.label.toLowerCase().includes('desktop') ||
-          track.label.toLowerCase().includes('screen') ||
-          track.label.toLowerCase().includes('system')) {
-          console.warn('MINE mode: Warning - detected system audio track, stopping it');
-          track.stop();
-        }
+        console.log(`[VoiceAssistant] Track Label: "${track.label}", ID: ${track.id}, Enabled: ${track.enabled}, ReadyState: ${track.readyState}`);
       });
 
       // Bring window back to front
@@ -636,6 +653,9 @@ class VoiceAssistant {
       // Create AudioContext for Voice Activity Detection
       try {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if (this.audioContext.state === 'suspended') {
+          await this.audioContext.resume();
+        }
         const source = this.audioContext.createMediaStreamSource(this.audioStream);
         this.analyserNode = this.audioContext.createAnalyser();
         this.analyserNode.fftSize = 256;
@@ -647,16 +667,37 @@ class VoiceAssistant {
         // Continue without VAD if AudioContext fails
       }
 
-      // Create MediaRecorder
-      this.mediaRecorder = new MediaRecorder(this.audioStream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
+      // Create MediaRecorder - detect supported mimeType
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        ''
+      ];
+      let selectedMime = '';
+      for (const mime of mimeTypes) {
+        if (mime === '' || MediaRecorder.isTypeSupported(mime)) {
+          selectedMime = mime;
+          console.log(`[VoiceAssistant] Using mimeType: "${mime || 'browser default'}"`);
+          break;
+        }
+      }
 
+      this.mediaRecorder = selectedMime
+        ? new MediaRecorder(this.audioStream, { mimeType: selectedMime })
+        : new MediaRecorder(this.audioStream);
+
+      let chunkCount = 0;
       // Handle data available
       this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
+          chunkCount++;
+          console.log(`[VoiceAssistant] Audio chunk #${chunkCount} received: ${event.data.size} bytes`);
           this.currentCycleChunks.push(event.data);
           this.accumulatedChunks.push(event.data);
+        } else {
+          console.warn('[VoiceAssistant] ondataavailable fired but data is empty!');
         }
       };
 
@@ -664,30 +705,24 @@ class VoiceAssistant {
       this.mediaRecorder.onstop = async () => {
         if (this.currentCycleChunks.length > 0) {
           const blob = new Blob(this.currentCycleChunks, { type: 'audio/webm' });
-          this.currentCycleChunks = []; // Reset for next cycle
+          this.currentCycleChunks = [];
           await this.processAudioBlob(blob);
         }
-
-        // Restart if still active (VAD will detect next speech)
+        // Restart immediately if still active — continuous chunked capture
         if (this.isActive) {
-          // Small delay before restarting to avoid immediate re-trigger
-          setTimeout(() => {
-            if (this.isActive) {
-              this.startRecordingCycle();
-            }
-          }, 200);
+          this.startRecordingCycle();
         }
       };
 
-      // Start VAD checking interval
+      // Start VAD checking for UI feedback only (not gating)
       if (this.analyserNode) {
         this.voiceActivityCheckInterval = setInterval(() => {
           this.checkVoiceActivity();
-        }, 40); // 25 times per second for ultra-low latency detection
-        console.log('VAD checking started for MINE mode');
+        }, 100);
+        console.log('[VoiceAssistant] VAD checking started (UI feedback only)');
       }
 
-      // Start the first recording cycle
+      // Start continuous recording — every 5 seconds we get a chunk
       this.startRecordingCycle();
 
     } catch (error) {
@@ -697,74 +732,101 @@ class VoiceAssistant {
   }
 
   /**
-   * Check voice activity using audio analysis
+   * VAD tick for YOURS mode — starts recording on speech, stops on silence
    */
-  checkVoiceActivity() {
-    if (!this.analyserNode || !this.isActive) return;
+  _yoursVADTick() {
+    if (!this.analyserNode || !this.isActive || this.mode !== 'yours') return;
 
     try {
-      const now = Date.now();
-      const dataArray = new Uint8Array(this.analyserNode.frequencyBinCount);
+      const bufLen = this.analyserNode.frequencyBinCount;
+      const dataArray = new Uint8Array(bufLen);
       this.analyserNode.getByteFrequencyData(dataArray);
 
-      // Calculate average volume
-      const sum = dataArray.reduce((a, b) => a + b, 0);
-      const average = sum / dataArray.length;
+      let sum = 0;
+      for (let i = 0; i < bufLen; i++) sum += dataArray[i];
+      const avg = sum / bufLen;
 
-      // Convert to dB (0-255 range, normalize and convert to dB)
-      // Avoid log(0) by adding small value
-      const normalized = average / 255;
-      const volume = normalized > 0 ? 20 * Math.log10(normalized) : -100;
+      // avg > 8 is a reasonable threshold for system audio speech vs silence/noise
+      // Adjust this if needed — higher = only react to louder audio
+      const speaking = avg > 8;
 
-      // Log volume level periodically (every 1 second) to help debug
-      if (!this._lastVolLogTime || now - this._lastVolLogTime > 1000) {
-        console.log(`[VoiceAssistant] VAD Volume: ${volume.toFixed(2)} dB (Speech > ${this.speechThreshold}, Silence < ${this.silenceThreshold})`);
-        this._lastVolLogTime = now;
-      }
-      const recordingDuration = this.recordingStartTime ? now - this.recordingStartTime : 0;
-
-      // Check for maximum recording duration
-      if (recordingDuration >= this.maxRecordingDuration && this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-        console.log('Maximum recording duration reached, processing audio');
-        this.stopRecordingAndProcess();
-        return;
+      if (speaking !== this.isSpeaking) {
+        this.isSpeaking = speaking;
+        this.updateStatus();
       }
 
-      // Check for minimum recording duration before allowing silence detection
-      const canDetectSilence = recordingDuration >= this.minRecordingDuration;
-
-      if (volume > this.speechThreshold) {
-        // Speech detected
-        if (!this.isSpeaking && canDetectSilence) {
-          console.log(`[VoiceAssistant] SPEECH DETECTED! Volume: ${volume.toFixed(2)} dB (threshold: ${this.speechThreshold})`);
+      if (speaking) {
+        // Cancel any pending silence timer
+        if (this._yoursSilenceTimer) {
+          clearTimeout(this._yoursSilenceTimer);
+          this._yoursSilenceTimer = null;
         }
-        this.isSpeaking = true;
-        this.silenceStartTime = null;
-      } else if (volume < this.silenceThreshold) {
-        // Silence detected
-        if (this.isSpeaking && canDetectSilence) {
-          if (!this.silenceStartTime) {
-            this.silenceStartTime = now;
-            console.log(`[VoiceAssistant] SILENCE DETECTED, starting timer (vol: ${volume.toFixed(2)} dB, threshold: ${this.silenceThreshold})`);
-          } else {
-            const silenceDuration = now - this.silenceStartTime;
-            if (silenceDuration >= this.silenceDurationThreshold) {
-              // User stopped speaking - process audio
-              console.log(`[VoiceAssistant] SILENCE THRESHOLD MET (${silenceDuration}ms), stopping recording`);
-              this.isSpeaking = false;
-              this.stopRecordingAndProcess();
-              this.silenceStartTime = null;
-            }
+
+        // Start recording if not already
+        if (!this._yoursRecording && this.mediaRecorder && this.mediaRecorder.state === 'inactive') {
+          this.currentCycleChunks = [];
+          this._yoursRecording = true;
+          try {
+            this.mediaRecorder.start();
+            console.log('[VoiceAssistant] YOURS VAD: Speech detected, recording started');
+          } catch (e) {
+            console.error('[VoiceAssistant] YOURS VAD: start() failed:', e.message);
+            this._yoursRecording = false;
           }
-        } else if (!this.isSpeaking && !this.silenceStartTime) {
-          // Not speaking yet, waiting for speech
-          this.silenceStartTime = null;
+        }
+      } else {
+        // Silence — start a timer to stop recording
+        if (this._yoursRecording && !this._yoursSilenceTimer) {
+          const silenceMs = this.silenceDurationThreshold || 1000;
+          this._yoursSilenceTimer = setTimeout(() => {
+            this._yoursSilenceTimer = null;
+            if (this._yoursRecording && this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+              console.log(`[VoiceAssistant] YOURS VAD: Silence for ${silenceMs}ms, stopping recording to process`);
+              this.mediaRecorder.stop();
+            }
+          }, silenceMs);
         }
       }
-    } catch (error) {
-      console.error('Error in voice activity detection:', error);
+    } catch (e) {
+      // Ignore VAD errors
     }
   }
+
+  /**
+   * Check voice activity — used for UI feedback in MINE mode
+   */
+  async checkVoiceActivity() {
+    if (!this.analyserNode || !this.isActive || this.mode !== 'mine') return;
+
+    try {
+      // Use FrequencyData for volume measurement
+      const bufLen = this.analyserNode.frequencyBinCount;
+      const dataArray = new Uint8Array(bufLen);
+      this.analyserNode.getByteFrequencyData(dataArray);
+
+      let sum = 0;
+      for (let i = 0; i < bufLen; i++) sum += dataArray[i];
+      const avg = sum / bufLen;
+      // avg: 0-255. Scale to rough dB: 0 = -100dB, 255 = 0dB
+      const volume = avg > 0 ? (avg / 255) * 100 - 100 : -100;
+
+      const now = Date.now();
+      if (!this._lastVolLogTime || now - this._lastVolLogTime > 2000) {
+        console.log(`[VoiceAssistant] Mic level: ${avg.toFixed(1)}/255 (~${volume.toFixed(0)}dB equiv)`);
+        this._lastVolLogTime = now;
+      }
+
+      // Simple speaking indicator: avg > 5 means some audio activity
+      const speaking = avg > 5;
+      if (speaking !== this.isSpeaking) {
+        this.isSpeaking = speaking;
+        this.updateStatus();
+      }
+    } catch (e) {
+      // Ignore VAD errors
+    }
+  }
+
 
   /**
    * Stop recording and process accumulated audio
@@ -788,25 +850,29 @@ class VoiceAssistant {
     }
   }
 
-  // Helper to manage the recording cycle (now VAD-based)
+  // Start a timed recording cycle: record for 5 seconds, then auto-process
   startRecordingCycle() {
     if (!this.isActive || !this.mediaRecorder) return;
+    if (this.mediaRecorder.state === 'recording') return;
 
-    // If already recording, don't restart
-    if (this.mediaRecorder.state === 'recording') {
+    this.currentCycleChunks = [];
+    this.recordingStartTime = Date.now();
+
+    try {
+      this.mediaRecorder.start();
+      console.log(`[VoiceAssistant] Recording started — state: ${this.mediaRecorder.state}, mimeType: ${this.mediaRecorder.mimeType}`);
+    } catch (e) {
+      console.error('[VoiceAssistant] MediaRecorder.start() failed:', e.message);
       return;
     }
 
-    // Reset state
-    this.currentCycleChunks = [];
-    this.accumulatedChunks = [];
-    this.isSpeaking = false;
-    this.silenceStartTime = null;
-    this.recordingStartTime = Date.now();
-
-    // Start recording
-    this.mediaRecorder.start();
-    console.log('Started new recording cycle (VAD-based)');
+    // Auto-stop after 5 seconds to create a processable chunk
+    this._chunkTimer = setTimeout(() => {
+      if (this.isActive && this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+        console.log('[VoiceAssistant] 5s chunk complete, stopping to process...');
+        this.mediaRecorder.stop();
+      }
+    }, 5000);
   }
 
   /**
@@ -833,7 +899,7 @@ class VoiceAssistant {
             noiseSuppression: false,
             autoGainControl: false,
             suppressLocalAudioPlayback: false,
-            sampleRate: 44100
+            sampleRate: 16000  // Whisper works best at 16kHz, smaller file = faster upload
           },
           video: true // Required for getDisplayMedia
         });
@@ -912,48 +978,46 @@ class VoiceAssistant {
       // Initialize chunk storage
       this.currentCycleChunks = [];
       this.accumulatedChunks = [];
+      this._yoursRecording = false; // Are we actively recording speech?
+      this._yoursSilenceTimer = null;
 
       // Create MediaRecorder
-      this.mediaRecorder = new MediaRecorder(this.audioStream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus' : 'audio/webm';
+      this.mediaRecorder = new MediaRecorder(this.audioStream, { mimeType });
 
-      // Handle data available
+      // Collect chunks while recording
       this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           this.currentCycleChunks.push(event.data);
-          this.accumulatedChunks.push(event.data);
         }
       };
 
-      // Handle stop
+      // When recording stops, process the captured speech
       this.mediaRecorder.onstop = async () => {
+        this._yoursRecording = false;
         if (this.currentCycleChunks.length > 0) {
-          const blob = new Blob(this.currentCycleChunks, { type: 'audio/webm' });
-          this.currentCycleChunks = []; // Reset for next cycle
-          await this.processAudioBlob(blob);
-        }
-
-        // Restart if still active
-        if (this.isActive) {
-          setTimeout(() => {
-            if (this.isActive) {
-              this.startRecordingCycle();
-            }
-          }, 200);
+          const blob = new Blob(this.currentCycleChunks, { type: mimeType });
+          this.currentCycleChunks = [];
+          if (blob.size >= 8000) { // Only send if there is real audio
+            await this.processAudioBlob(blob);
+          } else {
+            console.log('[VoiceAssistant] YOURS: Blob too small after speech, discarding.');
+          }
         }
       };
 
-      // Start VAD checking interval
+      // Start VAD-driven recording loop for YOURS mode
       if (this.analyserNode) {
         this.voiceActivityCheckInterval = setInterval(() => {
-          this.checkVoiceActivity();
-        }, 40); // Same for YOURS mode
-        console.log('[VoiceAssistant] YOURS: VAD checking started');
+          this._yoursVADTick();
+        }, 40);
+        console.log('[VoiceAssistant] YOURS: VAD-gated recording started');
+      } else {
+        // No analyser - fall back to 10s cycles
+        this.startRecordingCycle();
       }
 
-      // Start the first recording cycle
-      this.startRecordingCycle();
       console.log('[VoiceAssistant] YOURS mode fully active');
 
     } catch (error) {
@@ -990,8 +1054,16 @@ class VoiceAssistant {
    * Send audio to transcription API
    */
   async processAudioBlob(audioBlob) {
+    // If already processing, wait up to 2 seconds for it to finish before skipping
+    // This handles cases where one sentence is being transcribed while another is being captured
+    let waitCount = 0;
+    while (this.isProcessing && waitCount < 10) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      waitCount++;
+    }
+
     if (this.isProcessing) {
-      console.log('[VoiceAssistant] Still processing previous request, skipping');
+      console.warn('[VoiceAssistant] Still processing previous request after waiting, skipping to avoid congestion');
       return;
     }
 
@@ -999,6 +1071,19 @@ class VoiceAssistant {
     this.updateStatus();
 
     try {
+      // CRITICAL: Check blob size before sending.
+      // Silent/empty audio blobs are 2,000-5,000 bytes (just container overhead).
+      // Real speech at 5 seconds is 15,000-80,000+ bytes.
+      // Sending silence causes Whisper to hallucinate 'you'.
+      const MIN_SPEECH_BLOB_SIZE = 8000; // bytes
+      console.log(`[VoiceAssistant] Blob size: ${audioBlob.size} bytes (min: ${MIN_SPEECH_BLOB_SIZE})`);
+      if (audioBlob.size < MIN_SPEECH_BLOB_SIZE) {
+        console.log('[VoiceAssistant] Blob too small = silence detected, skipping transcription');
+        this.isProcessing = false;
+        this.updateStatus();
+        return;
+      }
+
       console.log('[VoiceAssistant] Starting transcription request...');
       const arrayBuffer = await audioBlob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
@@ -1027,53 +1112,30 @@ class VoiceAssistant {
 
       if (transcriptionResult.success && transcriptionResult.text) {
         const text = transcriptionResult.text.trim();
+        console.log('[VoiceAssistant] Transcription text:', JSON.stringify(text));
 
-        // Anti-hallucination / filter logic
-        if (this.isMeaningfulSpeech(text)) {
-          // Skip duplicates logic
-          const isDuplicate = this.recentTranscriptions.some(prev => {
-            const similarity = this.calculateSimilarity(text, prev);
-            return similarity > 0.8;
-          });
+        // Only skip completely empty results
+        if (text.length > 1) {
+          this.lastTranscription = text;
+          this.lastTranscriptionTime = Date.now();
+          this.updateStatus();
 
-          if (!isDuplicate) {
-            this.lastTranscription = text;
-            this.lastTranscriptionTime = Date.now();
-            this.recentTranscriptions.push(text);
-            if (this.recentTranscriptions.length > 5) this.recentTranscriptions.shift();
+          // Find input and send
+          const input = this.chatUI?.inputArea || document.getElementById('message-input');
+          const sendBtn = this.chatUI?.sendButton || document.getElementById('send-button');
 
-            this.updateStatus();
-
-            if (this.onTranscription) {
-              this.onTranscription(text);
-            }
-
-            console.log(`Voice mode (${this.mode}): Auto-filling input and clicking send`);
-
-            // Find input and send button
-            const input = this.chatUI?.inputArea || document.getElementById('message-input');
-            const sendBtn = this.chatUI?.sendButton || document.getElementById('send-button');
-
-            if (input && sendBtn) {
-              // Set input value
-              input.value = text;
-              // Trigger input event to ensure any binding/resizing happens
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-
-              // Click send button to use the standard chat logic
-              // This ensures we get the "100% working" chat behavior user wants
-              setTimeout(() => {
-                sendBtn.click();
-              }, 100);
-            } else {
-              console.warn('VoiceAssistant: Could not find input or send button, falling back to internal response generation');
-              await this.generateResponse(text);
-            }
+          if (input && sendBtn) {
+            input.value = text;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            setTimeout(() => sendBtn.click(), 100);
+          } else {
+            console.warn('[VoiceAssistant] Could not find input/send button');
           }
         } else {
-          this.lastTranscription = '...';
-          this.updateStatus();
+          console.log('[VoiceAssistant] Skipping empty/too-short transcription');
         }
+      } else {
+        console.warn('[VoiceAssistant] Transcription returned no text:', transcriptionResult);
       }
 
     } catch (error) {
@@ -1093,18 +1155,15 @@ class VoiceAssistant {
     // Deprecated in favor of stop-start cycle
   }
 
-  /**
-   * Check if text is meaningful speech (enhanced filtering)
-   */
   isMeaningfulSpeech(text) {
-    if (!text || text.length < 3) return false;
+    if (!text || text.length < 2) return false;
 
     // Filter out common transcription artifacts
     const noisePatterns = [
       /^[\s\.,!?\-]+$/,  // Only punctuation/whitespace
-      /^(uh|um|ah|er|hmm|mm|huh)+$/i,  // Only filler words
+      /^(uh|um|ah|er|hmm|mm|huh|un|ugh|oh|uhm|mmm)+$/i,  // Only filler words
       /^[^\w\s]+$/,  // Only special characters
-      /^[a-z]{1,2}$/i,  // Single or double letter (likely noise)
+      /^(.)\1+$/i,   // Repeated single character like "aaaa"
     ];
 
     for (const pattern of noisePatterns) {
@@ -1113,14 +1172,22 @@ class VoiceAssistant {
       }
     }
 
-    // Check if it has actual words (minimum 2-3 words for meaningful speech)
-    const words = text.split(/\s+/).filter(w => w.length > 1);
+    // Check if it has actual words
+    const words = text.split(/\s+/).filter(w => w.length >= 1);
+
+    // Very short words (1-2 chars) that are not in the list
+    if (text.length < 2) return false;
+
     if (words.length < 2) {
       // Single word - only accept if it's a question word or important word
-      const questionWords = ['what', 'who', 'where', 'when', 'why', 'how', 'which', 'whose'];
-      const importantWords = ['yes', 'no', 'ok', 'okay', 'help', 'stop', 'start'];
-      const lowerText = text.toLowerCase().trim();
-      if (!questionWords.includes(lowerText) && !importantWords.includes(lowerText)) {
+      // Single word - only accept if it's common conversational word
+      const commonWords = [
+        'what', 'who', 'where', 'when', 'why', 'how', 'which', 'whose',
+        'yes', 'no', 'ok', 'okay', 'help', 'stop', 'start', 'wait', 'go',
+        'hello', 'hi', 'hey', 'thanks', 'thank', 'cool', 'nice', 'good', 'bad'
+      ];
+      const lowerText = text.toLowerCase().trim().replace(/[?.!,]/g, '');
+      if (!commonWords.includes(lowerText)) {
         return false;
       }
     }
@@ -1166,7 +1233,7 @@ class VoiceAssistant {
     this.isProcessing = true;
     this.responseBuffer = ''; // Reset buffer for new response
     this.updateStatus();
-    
+
     try {
       // Reload config to ensure we have the latest keys/settings
       await this.loadConfig();
