@@ -204,6 +204,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   toggleOverlay: () => ipcRenderer.invoke('toggle-overlay'),
   setOverlayIgnoreMouse: (ignore) => ipcRenderer.invoke('set-overlay-ignore-mouse', ignore),
   getOverlayBounds: () => ipcRenderer.invoke('get-overlay-bounds'),
+  setOverlayBounds: (bounds) => ipcRenderer.invoke('set-overlay-bounds', bounds),
   captureOverlayArea: (bounds) => ipcRenderer.invoke('capture-overlay-area', bounds),
   onOverlayStateChanged: (callback) => {
     ipcRenderer.on('overlay-state-changed', (event, data) => callback(data));

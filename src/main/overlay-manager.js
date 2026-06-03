@@ -32,7 +32,7 @@ function createOverlayWindow() {
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
-    resizable: true,
+    resizable: false,
     movable: true,
     webPreferences: {
       nodeIntegration: false,
@@ -40,6 +40,9 @@ function createOverlayWindow() {
       preload: path.join(__dirname, '../preload/preload.js')
     }
   });
+
+  // Security: Hide window from screen sharing/capture
+  overlayWindow.setContentProtection(true);
 
   // Load the overlay HTML
   overlayWindow.loadFile(path.join(__dirname, '../renderer/overlay.html'));
@@ -105,15 +108,18 @@ function initialize() {
     return { success: false, error: 'Overlay window not active' };
   });
 
+  ipcMain.handle('set-overlay-bounds', (event, bounds) => {
+    if (overlayWindow) {
+      overlayWindow.setBounds(bounds);
+      return { success: true };
+    }
+    return { success: false, error: 'Overlay window not active' };
+  });
+
   ipcMain.handle('capture-overlay-area', async (event, bounds) => {
     try {
-      if (overlayWindow) {
-        overlayWindow.setOpacity(0);
-        await new Promise(r => setTimeout(r, 150));
-      }
-
       const display = screen.getDisplayMatching(bounds);
-      
+
       // FALLBACK: Use native Windows capture if possible (advanced bypass)
       // For now, we'll stick to high-res desktopCapturer but with a safer source selection
       const sources = await desktopCapturer.getSources({
@@ -124,11 +130,9 @@ function initialize() {
         }
       });
 
-      if (overlayWindow) overlayWindow.setOpacity(1);
-
       // Filter sources to find the one matching our display
       const source = sources.find(s => s.id.includes(display.id.toString())) || sources[0];
-      
+
       let finalDataUrl;
       if (source) {
         finalDataUrl = source.thumbnail.toDataURL();
@@ -150,7 +154,6 @@ function initialize() {
         scaleFactor: display.scaleFactor
       };
     } catch (error) {
-      if (overlayWindow) overlayWindow.setOpacity(1);
       console.error('Capture failed:', error);
       return { success: false, error: error.message };
     }
