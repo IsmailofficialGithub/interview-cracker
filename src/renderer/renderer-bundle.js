@@ -80,6 +80,7 @@
 
       this.setupEventListeners();
       this.loadChatHistory();
+      
       this.startAutoSave();
 
       window.electronAPI.onWindowBlur(() => {
@@ -2185,13 +2186,15 @@
       setTimeout(() => this.updateScrollButton(), 100);
     }
 
-    autoScroll() {
-      // Only auto-scroll if user is already at the bottom (within 50px)
-      const isNearBottom = this.chatContainer.scrollHeight - this.chatContainer.scrollTop - this.chatContainer.clientHeight < 50;
-      if (isNearBottom) {
-        this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
-      }
-      this.updateScrollButton();
+    autoScroll(force = false) {
+      setTimeout(() => {
+        // Only auto-scroll if user is already at the bottom (within 50px) or if force is true
+        const isNearBottom = this.chatContainer.scrollHeight - this.chatContainer.scrollTop - this.chatContainer.clientHeight < 50;
+        if (isNearBottom || force) {
+          this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+        }
+        this.updateScrollButton();
+      }, 50);
     }
 
     setupScrollButton() {
@@ -2488,7 +2491,7 @@
           });
 
           this.rerenderMessages();
-          this.autoScroll();
+          this.autoScroll(true);
         } else {
           // No data or failed to load - start with empty chat
           this.messages = [];
@@ -2624,7 +2627,7 @@
       }
 
       this.rerenderMessages();
-      this.autoScroll();
+      this.autoScroll(true);
 
       // Refresh sidebar highlight if it exists
       if (typeof loadChatsList === 'function') {
