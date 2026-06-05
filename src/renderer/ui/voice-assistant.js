@@ -71,6 +71,10 @@ class VoiceAssistant {
     this.maxRecordingDuration = 30000; // Maximum 30 seconds of recording
     this.recordingStartTime = null;
     this.accumulatedChunks = []; // Store chunks while speaking
+
+    // YOURS mode adaptive VAD calibration
+    this.yoursVADThreshold = 8;   // Default — overwritten after calibration
+    this.yoursCalibrated = false; // True once noise floor has been measured
   }
 
   /**
@@ -746,9 +750,9 @@ class VoiceAssistant {
       for (let i = 0; i < bufLen; i++) sum += dataArray[i];
       const avg = sum / bufLen;
 
-      // avg > 8 is a reasonable threshold for system audio speech vs silence/noise
-      // Adjust this if needed — higher = only react to louder audio
-      const speaking = avg > 8;
+      // Use the adaptive threshold measured during the 2-second calibration phase.
+      // Falls back to 8 (the old hardcoded value) if calibration hasn't finished yet.
+      const speaking = avg > (this.yoursVADThreshold || 8);
 
       if (speaking !== this.isSpeaking) {
         this.isSpeaking = speaking;
@@ -1009,10 +1013,53 @@ class VoiceAssistant {
 
       // Start VAD-driven recording loop for YOURS mode
       if (this.analyserNode) {
-        this.voiceActivityCheckInterval = setInterval(() => {
-          this._yoursVADTick();
-        }, 40);
-        console.log('[VoiceAssistant] YOURS: VAD-gated recording started');
+        // ── Auto-calibration ──────────────────────────────────────────────────
+        // Listen silently for 2 seconds to measure the background noise floor,
+        // then set the speech threshold just above it.  This makes YOURS mode
+        // work correctly regardless of meeting platform (Google Workspace, Zoom,
+        // Teams, etc.) or how quietly/loudly the remote speaker's audio arrives.
+        this.yoursCalibrated = false;
+        this.yoursVADThreshold = 8; // safe fallback while calibrating
+        this.updateStatus(); // show "Calibrating..." if updateStatus handles it
+        console.log('[VoiceAssistant] YOURS: Calibrating noise floor for 2 seconds...');
+
+        const CALIBRATION_MS = 2000;
+        const CALIBRATION_TICK = 40; // same as VAD tick rate
+        const calibrationSamples = [];
+
+        const calibrationInterval = setInterval(() => {
+          if (!this.analyserNode) return;
+          const bufLen = this.analyserNode.frequencyBinCount;
+          const data = new Uint8Array(bufLen);
+          this.analyserNode.getByteFrequencyData(data);
+          let sum = 0;
+          for (let i = 0; i < bufLen; i++) sum += data[i];
+          calibrationSamples.push(sum / bufLen);
+        }, CALIBRATION_TICK);
+
+        setTimeout(() => {
+          clearInterval(calibrationInterval);
+
+          // Calculate average noise floor from samples
+          const noiseFloor = calibrationSamples.length > 0
+            ? calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length
+            : 0;
+
+          // Set threshold = noise floor + offset (catches real speech above background)
+          // Minimum of 3 so we never trigger on pure digital silence (avg=0)
+          const OFFSET = 6; // headroom above noise floor to require before treating as speech
+          this.yoursVADThreshold = Math.max(3, noiseFloor + OFFSET);
+          this.yoursCalibrated = true;
+
+          console.log(`[VoiceAssistant] YOURS: Calibration complete. Noise floor avg=${noiseFloor.toFixed(2)}, VAD threshold set to ${this.yoursVADThreshold.toFixed(2)}`);
+
+          // Now start the real VAD loop
+          this.voiceActivityCheckInterval = setInterval(() => {
+            this._yoursVADTick();
+          }, 40);
+          console.log('[VoiceAssistant] YOURS: VAD-gated recording started (adaptive threshold)');
+        }, CALIBRATION_MS);
+        // ─────────────────────────────────────────────────────────────────────
       } else {
         // No analyser - fall back to 10s cycles
         this.startRecordingCycle();
