@@ -1,6 +1,6 @@
 {
   "name": "noctisai",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Noctisai - Private AI Chat - Secure Electron app with screen-sharing protection",
   "main": "src/main/main.js",
   "scripts": {
