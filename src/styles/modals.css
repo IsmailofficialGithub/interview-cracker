@@ -243,12 +243,35 @@
   padding: 32px;
   max-width: 600px;
   width: 90%;
+  height: 550px; /* Fixed height to prevent button jumping */
   max-height: 90vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .onboarding-step {
   display: none;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 8px; /* Space for scrollbar */
+}
+
+/* Thin Scrollbar for Onboarding Steps */
+.onboarding-step::-webkit-scrollbar {
+  width: 6px;
+}
+
+.onboarding-step::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.onboarding-step::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 3px;
+}
+
+.onboarding-step::-webkit-scrollbar-thumb:hover {
+  background: #777;
 }
 
 .onboarding-step.active {
@@ -275,7 +298,8 @@
 .onboarding-actions {
   display: flex;
   justify-content: space-between;
-  margin-top: 32px;
+  margin-top: auto; /* Push to bottom if content is short */
   padding-top: 16px;
   border-top: 1px solid #444;
+  flex-shrink: 0;
 }

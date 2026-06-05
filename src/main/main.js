@@ -167,11 +167,17 @@ function createWindow() {
 
     if (parsedUrl.origin !== 'file://') {
       event.preventDefault();
+      if (navigationUrl.startsWith('http://') || navigationUrl.startsWith('https://')) {
+        require('electron').shell.openExternal(navigationUrl);
+      }
     }
   });
 
   // Security: Prevent new window creation
-  mainWindow.webContents.setWindowOpenHandler(() => {
+  mainWindow.webContents.setWindowOpenHandler((details) => {
+    if (details.url.startsWith('http://') || details.url.startsWith('https://')) {
+      require('electron').shell.openExternal(details.url);
+    }
     return { action: 'deny' };
   });
 
