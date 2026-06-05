@@ -1,5 +1,5 @@
 {
-  "latest_version": "1.0.3",
-  "min_supported_version": "1.0.3",
-  "release_notes": "Official Update v1.0.3 - Smart Adaptive VAD for System Audio."
+  "latest_version": "1.0.4",
+  "min_supported_version": "1.0.4",
+  "release_notes": "Official Update v1.0.4 - Fix GitHub Actions and Auto VAD."
 }
