@@ -1,8 +1,13 @@
-# Noctisai
+# 🕵️‍♂️ Noctisai
+
+![Version](https://img.shields.io/github/package-json/v/IsmailofficialGithub/interview-cracker)
+![License](https://img.shields.io/github/license/IsmailofficialGithub/interview-cracker)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
 Noctisai is a stealthy, secure, and advanced AI assistant designed for seamless interview and meeting support. It features a completely private architecture with zero-knowledge encryption, stealth display modes, and unique "Ghost User" capabilities for undetectable operation.
 
-## Key Features
+## ✨ Key Features
 
 ### 🛡️ Privacy & Stealth
 - **Undetectable Presence**: Hidden from the taskbar, task manager (process masking), and screen sharing tools (Zoom, Teams, OBS).
@@ -22,7 +27,11 @@ Noctisai is a stealthy, secure, and advanced AI assistant designed for seamless 
   - Physically simulates human typing to paste answers into code editors (HackerRank, LeetCode) or docs.
   - Includes variable typing speed and "fat finger" algorithm (mistakes & corrections) to bypass copy-paste detection.
   - Usage: Copy text -> Click target -> Press `Ctrl+Alt+V`.
-  - Configurable WPM, mistake chance, and shortcuts.
+
+### 🆕 New Features
+- **Transparent OCR Overlay**: Select any area on your screen to extract text seamlessly using a transparent overlay window. Perfect for extracting questions from uncopiable screens!
+- **Cross-Platform Support**: In addition to Windows, we now have comprehensive Linux build support (via `AppImage` and `deb`) including Dockerized CI builds.
+- **Advanced Voice Activity Detection (VAD)**: Real-time microphone and system audio capture with highly accurate voice activity detection to save API costs and improve transcriptions.
 
 ### 🪟 Window Management
 - **Always-On-Top**: Window stays on top of all other applications.
@@ -30,126 +39,63 @@ Noctisai is a stealthy, secure, and advanced AI assistant designed for seamless 
 - **Keyboard-Controlled Positioning**: Move window precisely with arrow keys.
 - **Desktop App Embedding** (Windows): Embed desktop applications within the Noctisai window for seamless integration.
 
-## Installation
+## 🚀 Getting Started
 
-1. **Download**: Get the latest `.exe` installer from the releases page.
+### Installation
+
+1. **Download**: Get the latest binary installer from the [Releases](https://github.com/IsmailofficialGithub/interview-cracker/releases) page. We support Windows (`.exe`) and Linux (`.AppImage`, `.deb`).
 2. **Install**: Run the installer. The app will launch silently.
 3. **Setup**:
    - Create a master password (cannot be recovered if lost - minimum 12 characters).
    - Configure your API keys (OpenAI, Groq, or compatible providers) in **Settings > AI Accounts**.
 
-## Usage Guide
-
-### Keyboard Shortcuts
+### Usage Guide
 
 #### Core Shortcuts
-- **Show/Hide App**: `Ctrl+Alt+H` (Default)
-  - *Fallback: `Ctrl+Shift+H` or `Ctrl+Alt+Shift+H` if primary fails*
-- **Ghost Type Clipboard**: `Ctrl+Alt+V` (Default)
-  - *Stops immediately if you press `ESC`*
-  - *Fallback: `Ctrl+Alt+Shift+V` or `Ctrl+Shift+V` if primary fails*
-- **Quit App**: `Ctrl+Alt+Q` (Default)
-  - *Fallback: `Ctrl+Alt+Shift+Q` or `Ctrl+Shift+Q` if primary fails*
-- **DevTools**: `F12` or `Ctrl+Shift+I` (Development mode)
+- **Show/Hide App**: `Ctrl+Alt+H`
+- **Ghost Type Clipboard**: `Ctrl+Alt+V`
+- **OCR Selection Overlay**: `Ctrl+Alt+O`
+- **Quit App**: `Ctrl+Alt+Q`
 
-#### Window Management Shortcuts
-- **Increase Window Size**: `Ctrl+Alt+Plus` (or `Ctrl+Alt+=`)
-  - Increases window size by 50px in both dimensions
-- **Decrease Window Size**: `Ctrl+Alt+-` (minus key)
-  - Decreases window size by 50px in both dimensions
-- **Move Window Left**: `Ctrl+Alt+Left Arrow`
-- **Move Window Right**: `Ctrl+Alt+Right Arrow`
-- **Move Window Up**: `Ctrl+Alt+Up Arrow`
-- **Move Window Down**: `Ctrl+Alt+Down Arrow`
+#### Window Management
+- **Increase/Decrease Size**: `Ctrl+Alt+Plus` / `Ctrl+Alt+-`
+- **Move Window**: `Ctrl+Alt + Arrow Keys`
 
-> **Note**: If a shortcut fails to register (e.g., already used by another app), the system will automatically try fallback shortcuts. Check the console output to see which shortcuts are active.
+#### Voice Modes
+- **Mine Mode**: Uses your microphone to transcribe what you say.
+- **Yours Mode**: Captures system audio to provide real-time AI context from conversations.
 
-### Voice Modes
-
-- **Mine Mode** (`MINE` button): 
-  - Uses your microphone to transcribe what you say
-  - Perfect for dictating responses or asking questions
-  - Transcriptions appear in the chat automatically
-
-- **Yours Mode** (`YOURS` button):
-  - Captures system audio (what others are saying in a meeting/interview)
-  - Provides real-time AI context from conversations
-  - Great for getting help during live interviews or meetings
-
-### Ghost Typer
-
+#### Ghost Typer Setup
 1. Copy AI-generated code/text to clipboard.
-2. Click into the destination window (e.g., Coding test editor, document).
+2. Click into the destination window.
 3. Press `Ctrl+Alt+V`.
-4. The app will "type" the text for you at your configured WPM.
-5. Press `ESC` at any time to stop.
+4. Press `ESC` at any time to stop.
+Configure WPM and typo likelihood in Settings.
 
-**Configuration** (in Settings):
-- **WPM**: Words per minute (default: 60)
-- **Mistake Chance**: Percentage chance of typos (default: 5%)
-- **Max Mistakes**: Maximum consecutive mistakes before correction (default: 1)
+## 🏗️ Architecture & Security
 
-### Chat Management
-
-- **New Chat**: Click the "Chats" button → "+ New Chat"
-  - Optionally provide a chat name and context
-  - Context helps the AI understand the conversation better
-- **Switch Between Chats**: Use the Chats sidebar to switch between different conversations
-- **Edit Chat**: Right-click a chat in the sidebar to edit its name or context
-
-### Settings
-
-Access settings via the **Settings** button in the top-right corner:
-
-- **AI Accounts**: Configure API keys for different providers
-- **Shortcuts**: Customize keyboard shortcuts
-- **Ghost Typer**: Adjust typing speed and mistake settings
-- **Privacy**: Configure security and stealth options
-
-## Security Architecture
-
+- **Framework**: Built on Electron 28+.
 - **Local-Only Storage**: No cloud database. All data resides on your machine.
-- **AES-256-GCM Encryption**: All chats and API keys are encrypted at rest.
-- **Memory Protection**: Sensitive keys are cleared from memory when the app is locked or closed.
-- **Process Masking**: Runs as a background process to avoid detection.
-- **Content Protection**: OS-level protection prevents screenshots and screen recording.
-- **Screen Sharing Detection**: Automatically hides sensitive UI when screen sharing is active.
+- **AES-256-GCM Encryption**: All chats and API keys are encrypted at rest with PBKDF2 key derivation.
+- **Process Masking & Content Protection**: OS-level protection prevents screenshots and screen recording.
+- **Voice Transcription**: OpenAI Whisper API or Groq Whisper.
 
-## Troubleshooting
+## 💻 Development & Contribution
 
-### Shortcuts Not Working
-
-If shortcuts fail to register, the app will automatically try fallback shortcuts. Check the console output to see which shortcuts are active. Common causes:
-
-- **Another application is using the shortcut**: The app will try fallback shortcuts automatically
-- **Windows permissions**: Run the app as administrator if shortcuts still don't work
-- **Shortcut format**: The app converts shortcuts automatically (e.g., `Ctrl` → `CommandOrControl`)
-
-### Voice Assistant Not Working
-
-- **Microphone permissions**: Ensure the app has microphone permissions
-- **System audio (Yours Mode)**: Requires screen sharing permissions on some systems
-- **API key**: Ensure your OpenAI or Groq API key is configured correctly
-
-### Window Not Staying on Top
-
-- The window automatically re-applies "always on top" every 2 seconds
-- If it still doesn't work, try hiding and showing the window again (`Ctrl+Alt+H`)
-
-### Cache Errors
-
-Cache errors in the console are usually harmless and don't affect functionality. They occur when Electron tries to access cache files that are locked by the system.
-
-## Development
+We welcome contributions! This is an open-source initiative and we'd love your help to make it better.
 
 ### Prerequisites
 - Node.js (v18 or higher)
 - npm or yarn
 - Windows build tools (for native modules)
 
-### Setup
+### Setup Instructions
 
 ```bash
+# Clone the repository
+git clone https://github.com/IsmailofficialGithub/interview-cracker.git
+cd interview-cracker
+
 # Install dependencies
 npm install
 
@@ -158,52 +104,32 @@ npm run rebuild
 
 # Run in dev mode
 npm run dev
-
-# Build for Windows
-npm run build
 ```
 
-### Project Structure
-
-```
-src/
-├── main/           # Electron main process
-│   ├── main.js     # Main entry point
-│   ├── ipc-handlers.js
-│   └── ...
-├── renderer/       # Electron renderer process (UI)
-│   ├── renderer.js
-│   ├── renderer-bundle.js
-│   └── ui/         # UI components
-├── preload/        # Preload scripts (bridge)
-└── security/       # Encryption and security modules
-```
-
-### Building Native Modules
-
-The app includes native Windows modules for window management. To rebuild:
+### Building the Project
 
 ```bash
-cd native
-node-gyp rebuild
+# Build for Windows
+npm run build
+
+# Build for Linux (Native)
+npm run build:linux
+
+# Build for Linux (via Docker for Windows users)
+npm run build:linux:docker
 ```
 
-## Technical Details
+## 🤝 Contributing
 
-- **Framework**: Electron 28+
-- **Encryption**: AES-256-GCM with PBKDF2 key derivation
-- **AI Providers**: OpenAI API, Groq API, OpenAI-compatible APIs (Ollama, etc.)
-- **Voice Transcription**: OpenAI Whisper API or Groq Whisper
-- **Platform**: Windows (primary), macOS/Linux (partial support)
+We encourage you to contribute to Noctisai! Here are a few ways you can help:
+- 🐛 **Report bugs**: Submit an issue if you encounter a problem.
+- 💡 **Suggest features**: Open an issue to propose a new feature.
+- 🛠️ **Create pull requests**: Fork the repo, make your changes, and submit a PR! Please ensure all code follows the existing style and includes appropriate tests.
 
-## License
+## 📄 License
 
-MIT
+This project is licensed under the [MIT License](LICENSE).
 
-## Contributing
+## 💬 Support & Community
 
-Contributions are welcome! Please ensure all code follows the existing style and includes appropriate tests.
-
-## Support
-
-For issues, feature requests, or questions, please open an issue on the GitHub repository.
+For issues, feature requests, or questions, please open an issue on our [GitHub repository](https://github.com/IsmailofficialGithub/interview-cracker/issues). Star ⭐ the repository if you find it helpful!

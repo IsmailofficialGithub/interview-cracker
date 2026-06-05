@@ -12,7 +12,11 @@
     "rebuild": "cd native && node-gyp rebuild",
     "install": "cd native && node-gyp rebuild",
     "build:linux": "electron-builder --linux",
-    "build:linux:docker": "docker run --rm -v \".:/project\" -v \"%USERPROFILE%/.cache/electron:/root/.cache/electron\" -v \"%USERPROFILE%/.cache/electron-builder:/root/.cache/electron-builder\" electronuserland/builder:wine npm run build:linux"
+    "build:linux:publish": "docker run --rm -v \".:/project\" -v \"%USERPROFILE%/.cache/electron:/root/.cache/electron\" -v \"%USERPROFILE%/.cache/electron-builder:/root/.cache/electron-builder\" -e GH_TOKEN=%GH_TOKEN% electronuserland/builder:wine sh -c \"cd /project && npm run build:linux:ci\"",
+    "build:linux:ci": "electron-builder --linux --publish always",
+    "build:linux:docker": "docker run --rm -v \".:/project\" -v \"%USERPROFILE%/.cache/electron:/root/.cache/electron\" -v \"%USERPROFILE%/.cache/electron-builder:/root/.cache/electron-builder\" electronuserland/builder:wine npm run build:linux",
+    "build:all": "npm run build && npm run build:linux:docker",
+    "build:all:publish": "npm run build:publish && npm run build:linux:publish"
   },
   "build": {
     "appId": "app.noctisai.desktop",
@@ -49,6 +53,20 @@
       "owner": "IsmailofficialGithub",
       "repo": "interview-cracker",
       "releaseType": "release"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Utility"
     }
   },
   "keywords": [

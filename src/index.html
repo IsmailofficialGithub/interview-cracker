@@ -132,6 +132,12 @@
             </p>
           </div>
           <div style="background: #333; padding: 12px; border-radius: 6px;">
+            <strong style="color: #e0aaff;">OCR Overlay <i data-feather="crop" class="icon-tiny"></i></strong>
+            <p style="margin-top: 4px; font-size: 0.9em;">
+              <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+O</code> - Open transparent overlay to select and extract text
+            </p>
+          </div>
+          <div style="background: #333; padding: 12px; border-radius: 6px;">
             <strong style="color: #ff4a4a;">Quit App <i data-feather="power" class="icon-tiny"></i></strong>
             <p style="margin-top: 4px; font-size: 0.9em;">
               <code style="background:#444; padding:2px 4px; border-radius:3px;">Ctrl+Alt+Q</code> - Fully exit the
@@ -186,6 +192,20 @@
         </div>
         <p style="font-size: 0.85em; opacity: 0.7; margin-top: 12px;">🔒 <strong>Privacy:</strong> All chats are
           encrypted locally. Screen sharing detection automatically hides sensitive UI elements.</p>
+      </div>
+
+      <!-- Step 5 -->
+      <div id="onboarding-step-5" class="onboarding-step" data-step="5">
+        <h2>👨‍💻 About Us</h2>
+        <div style="margin: 20px 0; background: #333; padding: 16px; border-radius: 8px;">
+          <h3 style="margin-bottom: 12px; color: #4a9eff;">Ismail Abbasi</h3>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <a href="https://github.com/IsmailofficialGithub/" style="color: #ccc; text-decoration: none; display: flex; align-items: center; gap: 8px;"><i data-feather="github" class="icon-tiny"></i> GitHub Profile</a>
+            <a href="https://www.linkedin.com/in/ismailabbasi/" style="color: #ccc; text-decoration: none; display: flex; align-items: center; gap: 8px;"><i data-feather="linkedin" class="icon-tiny"></i> LinkedIn</a>
+            <a href="https://github.com/IsmailofficialGithub/interview-cracker/" style="color: #ccc; text-decoration: none; display: flex; align-items: center; gap: 8px;"><i data-feather="code" class="icon-tiny"></i> Project Repository</a>
+            <a href="https://noctisai.ismailabbasi.qzz.io/" style="color: #ccc; text-decoration: none; display: flex; align-items: center; gap: 8px;"><i data-feather="download" class="icon-tiny"></i> Download Link</a>
+          </div>
+        </div>
       </div>
 
       <div class="onboarding-actions">
@@ -636,7 +656,7 @@
 
     // Onboarding Logic
     let currentStep = 1;
-    const totalSteps = 4;
+    const totalSteps = 5;
 
     function showOnboarding() {
       const modal = document.getElementById('onboarding-modal');
